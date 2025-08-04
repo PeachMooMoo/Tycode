@@ -23,7 +23,7 @@ pub struct ChatConfig {
 impl Default for ChatConfig {
     fn default() -> Self {
         Self {
-            file_modification_api: FileModificationApi::Patch,
+            file_modification_api: FileModificationApi::FindReplace,
             trace: true,
         }
     }
