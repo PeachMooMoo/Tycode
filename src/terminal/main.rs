@@ -57,6 +57,12 @@ async fn setup_provider(args: &Args) -> Result<BedrockProvider> {
     let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .profile_name(&profile_name)
         .region(aws_config::Region::new(args.region.clone()))
+        .retry_config(
+            aws_config::retry::RetryConfig::adaptive()
+                .with_max_attempts(15)
+                .with_initial_backoff(std::time::Duration::from_millis(100))
+                .with_max_backoff(std::time::Duration::from_secs(1)),
+        )
         .load()
         .await;
 

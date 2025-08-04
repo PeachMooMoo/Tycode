@@ -4,8 +4,7 @@ pub enum ToolType {
     WriteFile,
     ListFiles,
     SearchFiles,
-    ApplyPatch,
-    ReplaceInFile,
+    ModifyFile,
 }
 
 impl ToolType {
@@ -15,8 +14,7 @@ impl ToolType {
             Self::WriteFile => "write_file",
             Self::ListFiles => "list_files",
             Self::SearchFiles => "search_files",
-            Self::ApplyPatch => "apply_patch",
-            Self::ReplaceInFile => "replace_in_file",
+            Self::ModifyFile => "modify_file",
         }
     }
 
@@ -26,8 +24,7 @@ impl ToolType {
             "write_file" => Some(Self::WriteFile),
             "list_files" => Some(Self::ListFiles),
             "search_files" => Some(Self::SearchFiles),
-            "apply_patch" => Some(Self::ApplyPatch),
-            "replace_in_file" => Some(Self::ReplaceInFile),
+            "modify_file" | "apply_patch" | "replace_in_file" => Some(Self::ModifyFile),
             _ => None,
         }
     }

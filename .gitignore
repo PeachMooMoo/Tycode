@@ -1,0 +1,11 @@
+# Rust build artifacts
+target/
+
+# Rust dependency lock file
+Cargo.lock
+
+# Project-specific directories
+.brazil/
+
+# Tycode trace files
+.tycode/trace

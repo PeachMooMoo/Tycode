@@ -1,4 +1,4 @@
-use crate::agents::{ActiveAgent, Agent, DesignAgent, ToolType};
+use crate::agents::{ActiveAgent, Agent, SoftwareEngineerAgent, ToolType};
 use crate::ai::{
     bedrock::BedrockProvider,
     provider::AiProvider,
@@ -42,9 +42,9 @@ impl ChatActor {
     ) -> Self {
         let command_handler = CommandHandler::new(state.clone());
 
-        // Initialize with default design agent
+        // Initialize with software engineer agent
         let mut agent_stack = Vec::new();
-        agent_stack.push(ActiveAgent::new(Box::new(DesignAgent)));
+        agent_stack.push(ActiveAgent::new(Box::new(SoftwareEngineerAgent)));
 
         Self {
             state,
@@ -157,19 +157,10 @@ impl ChatActor {
                 current.agent.available_tools().into_iter().collect();
 
             let tool_registry = self.get_tool_registry();
-            let all_tools = tool_registry.get_tool_definitions();
 
-            // Filter tools based on current agent permissions
-            let available_tools: Vec<_> = all_tools
-                .into_iter()
-                .filter(|tool| {
-                    if let Some(tool_type) = ToolType::from_name(&tool.name) {
-                        allowed_tools.contains(&tool_type)
-                    } else {
-                        false
-                    }
-                })
-                .collect();
+            // Get tool definitions for the agent's allowed tool types
+            let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
+            let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
             let conversation = self.current_agent().conversation.clone();
             let model = current

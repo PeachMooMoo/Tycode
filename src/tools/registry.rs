@@ -1,4 +1,5 @@
 use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
+use crate::agents::ToolType;
 use crate::chat::state::FileModificationApi;
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::list_files::ListFilesTool;
@@ -14,12 +15,14 @@ use tracing::{debug, error};
 
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn ToolExecutor>>,
+    file_modification_api: FileModificationApi,
 }
 
 impl ToolRegistry {
     pub fn new(workspace_root: PathBuf, file_modification_api: FileModificationApi) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
+            file_modification_api: file_modification_api.clone(),
         };
 
         registry.register_file_tools(workspace_root, file_modification_api);
@@ -54,6 +57,36 @@ impl ToolRegistry {
         let name = tool.name().to_string();
         debug!(tool_name = %name, "Registering tool");
         self.tools.insert(name, tool);
+    }
+
+    /// Maps abstract tool types to concrete tool names based on configuration
+    fn get_concrete_tool_name(&self, tool_type: ToolType) -> Option<&'static str> {
+        match tool_type {
+            ToolType::ReadFile => Some("read_file"),
+            ToolType::WriteFile => Some("write_file"),
+            ToolType::ListFiles => Some("list_files"),
+            ToolType::SearchFiles => Some("search_files"),
+            ToolType::ModifyFile => {
+                match self.file_modification_api {
+                    FileModificationApi::Patch => Some("apply_patch"),
+                    FileModificationApi::FindReplace => Some("replace_in_file"),
+                }
+            }
+        }
+    }
+
+    /// Gets tool definitions for a specific set of tool types
+    pub fn get_tool_definitions_for_types(&self, tool_types: &[ToolType]) -> Vec<ToolDefinition> {
+        tool_types
+            .iter()
+            .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
+            .filter_map(|tool_name| self.tools.get(tool_name))
+            .map(|tool| ToolDefinition {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                input_schema: tool.input_schema(),
+            })
+            .collect()
     }
 
     pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
@@ -106,6 +139,7 @@ impl Clone for ToolRegistry {
     fn clone(&self) -> Self {
         let mut new_registry = Self {
             tools: HashMap::new(),
+            file_modification_api: self.file_modification_api.clone(),
         };
 
         for (name, tool) in &self.tools {
@@ -208,5 +242,46 @@ mod tests {
         let result = registry.execute_tool(&tool_use).await;
         assert!(result.is_error);
         assert!(result.content.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn test_get_tool_definitions_for_types() {
+        let temp_dir = tempdir().unwrap();
+        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+
+        let tool_types = vec![
+            ToolType::ReadFile,
+            ToolType::WriteFile,
+            ToolType::ModifyFile, // Should map to apply_patch
+        ];
+
+        let definitions = registry.get_tool_definitions_for_types(&tool_types);
+        assert_eq!(definitions.len(), 3);
+
+        let tool_names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"write_file"));
+        assert!(tool_names.contains(&"apply_patch"));
+    }
+
+    #[tokio::test]
+    async fn test_get_tool_definitions_for_types_find_replace() {
+        let temp_dir = tempdir().unwrap();
+        let registry = ToolRegistry::new(
+            temp_dir.path().to_path_buf(),
+            FileModificationApi::FindReplace,
+        );
+
+        let tool_types = vec![
+            ToolType::ReadFile,
+            ToolType::ModifyFile, // Should map to replace_in_file
+        ];
+
+        let definitions = registry.get_tool_definitions_for_types(&tool_types);
+        assert_eq!(definitions.len(), 2);
+
+        let tool_names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"replace_in_file"));
     }
 }
