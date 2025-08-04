@@ -1,0 +1,64 @@
+[package]
+name = "tycode"
+version = "0.1.0"
+edition = "2021"
+authors = ["Aurora DSQL Deco Team"]
+description = "AI-powered operational tool for DSQL"
+publish = false
+
+[lib]
+name = "tycode"
+path = "src/lib.rs"
+
+[dependencies]
+# AWS SDK dependencies
+aws-config = "1.1.1"
+aws-sdk-bedrockruntime = "1.4.0"
+aws-sdk-cloudwatchlogs = "1.4.0"
+aws-sdk-dsql = "1.1"
+aws-sdk-sts = "1.4.0"
+aws-smithy-types = { version = "1", features = ["serde-deserialize","serde-serialize"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
+
+# Async and concurrency
+tokio = { version = "1.36.0", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+anyhow = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.6.1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+base64 = "0.22"
+similar = "2.4"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+arboard = "3.2"
+
+# Terminal UI
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4.0", features = ["derive"] }
+tui-input = "0.10"
+unicode-width = "0.2"
+textwrap = "0.16"
+tui-scrollview = "0.5.1"
+tui-textarea = "0.7.0"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[bin]]
+name = "tycode-chat"
+path = "src/terminal/main.rs"
