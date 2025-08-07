@@ -97,7 +97,7 @@ impl ToolExecutor for SearchFilesTool {
             "properties": {
                 "directory_path": {
                     "type": "string",
-                    "description": "Directory to search in (relative to workspace root). Defaults to workspace root if not specified."
+                    "description": "Directory to search in. Defaults to workspace root if not specified."
                 },
                 "pattern": {
                     "type": "string",

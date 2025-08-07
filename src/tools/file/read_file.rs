@@ -48,7 +48,7 @@ impl ToolExecutor for ReadFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to read (relative to workspace root)"
+                    "description": "Path to the file to read"
                 },
                 "summary": {
                     "type": "boolean",

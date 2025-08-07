@@ -87,9 +87,11 @@ impl FileAccessManager {
     fn validate_path(&self, file_path: &str) -> Result<PathBuf> {
         let path = Path::new(file_path);
 
-        if path.is_absolute() {
-            anyhow::bail!("Absolute paths are not allowed: {}", file_path);
-        }
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.workspace_root.join(path)
+        };
 
         let canonical_workspace = self.workspace_root.canonicalize().with_context(|| {
             format!(
@@ -98,11 +100,16 @@ impl FileAccessManager {
             )
         })?;
 
-        let full_path = self.workspace_root.join(path);
-
         if let Ok(canonical_path) = full_path.canonicalize() {
             if !canonical_path.starts_with(&canonical_workspace) {
-                anyhow::bail!("Path traversal detected: {}", file_path);
+                anyhow::bail!("Path is outside workspace root: {}", file_path);
+            }
+        } else {
+            let parent_path = full_path.parent().unwrap_or(&full_path);
+            if let Ok(canonical_parent) = parent_path.canonicalize() {
+                if !canonical_parent.starts_with(&canonical_workspace) {
+                    anyhow::bail!("Path is outside workspace root: {}", file_path);
+                }
             }
         }
 

@@ -121,7 +121,7 @@ impl ToolExecutor for ReplaceInFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to modify (relative to workspace root)"
+                    "description": "Path to the file to modify"
                 },
                 "diff": {
                     "type": "string",
@@ -145,7 +145,7 @@ impl ToolExecutor for ReplaceInFileTool {
         let diff = arguments
             .get("diff")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff. Sometimes this can happen if you hit a token limit; try writing a smaller diff"))?;
 
         let dry_run = arguments
             .get("dry_run")

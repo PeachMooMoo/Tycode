@@ -34,7 +34,7 @@ impl ToolExecutor for WriteFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path where the file should be created (relative to workspace root)"
+                    "description": "Path where the file should be created"
                 },
                 "content": {
                     "type": "string",
@@ -54,7 +54,7 @@ impl ToolExecutor for WriteFileTool {
         let content = arguments
             .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;
 
         let mut file = self.file_access.open_write(file_path)?;
         file.write_all(content.as_bytes())?;

@@ -125,7 +125,7 @@ impl ToolExecutor for ApplyPatchTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to modify (relative to workspace root)"
+                    "description": "Path to the file to modify"
                 },
                 "patch": {
                     "type": "string",
