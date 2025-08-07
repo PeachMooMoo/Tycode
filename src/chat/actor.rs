@@ -133,7 +133,7 @@ impl ChatActor {
     }
 
     async fn handle_command(&mut self, command: &str) {
-        let messages = self.command_handler.handle_command(command).await;
+        let messages = self.command_handler.handle_command(command, Some(&self.provider)).await;
 
         for message in messages {
             if message.content == "Conversation cleared." {

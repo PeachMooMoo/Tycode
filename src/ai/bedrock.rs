@@ -23,6 +23,7 @@ impl BedrockProvider {
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
+            Model::ClaudeOpus41 => "us.anthropic.claude-opus-4-1-20250805-v1:0",
             Model::ClaudeOpus4 => "us.anthropic.claude-opus-4-20250514-v1:0",
             Model::ClaudeSonnet4 => "us.anthropic.claude-sonnet-4-20250514-v1:0",
             Model::ClaudeSonnet37 => "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
@@ -184,7 +185,7 @@ impl BedrockProvider {
 #[async_trait::async_trait]
 impl AiProvider for BedrockProvider {
     fn supported_models(&self) -> Vec<Model> {
-        vec![Model::ClaudeSonnet4, Model::ClaudeOpus4]
+        vec![Model::ClaudeOpus41, Model::ClaudeSonnet4, Model::ClaudeOpus4]
     }
 
     async fn converse(

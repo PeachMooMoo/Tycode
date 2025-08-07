@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod commands;
 pub mod events;
+pub mod rebuild_index_command;
 pub mod state;
 pub mod trace;
 

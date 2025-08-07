@@ -101,6 +101,50 @@ impl App {
             return;
         }
 
+        // Check if AI is processing - prevent most input except help and settings
+        if state.is_typing {
+            match key.code {
+                KeyCode::F(1) => {
+                    state.show_help = !state.show_help;
+                }
+                KeyCode::F(2) => {
+                    state.show_settings = !state.show_settings;
+                }
+                KeyCode::Esc => {
+                    state.show_help = false;
+                    state.show_settings = false;
+                }
+                // Allow scrolling while AI is processing
+                KeyCode::Up => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        state.scroll_state.scroll_up();
+                    }
+                }
+                KeyCode::Down => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        state.scroll_state.scroll_down();
+                    }
+                }
+                KeyCode::PageUp => {
+                    state.scroll_state.scroll_page_up();
+                }
+                KeyCode::PageDown => {
+                    state.scroll_state.scroll_page_down();
+                }
+                KeyCode::Home => {
+                    state.scroll_state.scroll_to_top();
+                }
+                KeyCode::End => {
+                    state.scroll_state.scroll_to_bottom();
+                }
+                _ => {
+                    // Ignore other input while AI is processing
+                    return;
+                }
+            }
+            return;
+        }
+
         // Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
         if key.code == KeyCode::Char('v')
             && (key.modifiers.contains(KeyModifiers::CONTROL)

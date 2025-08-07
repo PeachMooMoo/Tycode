@@ -60,6 +60,7 @@ impl Default for ModelTunings {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Model {
+    ClaudeOpus41,
     ClaudeOpus4,
     ClaudeSonnet4,
     ClaudeSonnet37,
@@ -72,6 +73,7 @@ pub enum Model {
 impl Model {
     pub const fn name(self) -> &'static str {
         match self {
+            Self::ClaudeOpus41 => "claude-opus-4-1",
             Self::ClaudeOpus4 => "claude-opus-4",
             Self::ClaudeSonnet4 => "claude-sonnet-4",
             Self::ClaudeSonnet37 => "claude-sonnet-3-7",
@@ -84,6 +86,7 @@ impl Model {
 
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
+            "claude-opus-4-1" => Some(Self::ClaudeOpus41),
             "claude-opus-4" => Some(Self::ClaudeOpus4),
             "claude-sonnet-4" => Some(Self::ClaudeSonnet4),
             "claude-sonnet-3-7" => Some(Self::ClaudeSonnet37),
@@ -100,6 +103,24 @@ impl Model {
 pub struct Message {
     pub role: MessageRole,
     pub content: Content,
+}
+
+impl Message {
+    pub fn new(role: MessageRole, content: Content) -> Self {
+        Self { role, content }
+    }
+
+    pub fn user(content: impl Into<Content>) -> Self {
+        Self::new(MessageRole::User, content.into())
+    }
+
+    pub fn assistant(content: impl Into<Content>) -> Self {
+        Self::new(MessageRole::Assistant, content.into())
+    }
+
+    pub fn system(content: impl Into<Content>) -> Self {
+        Self::new(MessageRole::System, content.into())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -239,6 +260,18 @@ impl From<Vec<ContentBlock>> for Content {
 impl From<ContentBlock> for Content {
     fn from(block: ContentBlock) -> Self {
         Self::new(vec![block])
+    }
+}
+
+impl From<String> for Content {
+    fn from(text: String) -> Self {
+        Self::text_only(text)
+    }
+}
+
+impl From<&str> for Content {
+    fn from(text: &str) -> Self {
+        Self::text_only(text.to_string())
     }
 }
 

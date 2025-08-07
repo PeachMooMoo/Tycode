@@ -11,6 +11,7 @@ pub mod aws;
 pub mod chat;
 pub mod config;
 pub mod db;
+pub mod indexing;
 pub mod terminal;
 pub mod timing;
 pub mod tools;

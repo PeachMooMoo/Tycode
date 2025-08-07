@@ -1,6 +1,8 @@
+use crate::ai::provider::AiProvider;
 use crate::chat::{
     events::{ChatMessage, MessageSender},
     state::SharedChatState,
+    rebuild_index_command::RebuildIndexCommand,
 };
 use std::time::Instant;
 
@@ -13,7 +15,7 @@ impl CommandHandler {
         Self { state }
     }
 
-    pub async fn handle_command(&self, command: &str) -> Vec<ChatMessage> {
+    pub async fn handle_command(&self, command: &str, provider: Option<&dyn AiProvider>) -> Vec<ChatMessage> {
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             return vec![];
@@ -25,6 +27,7 @@ impl CommandHandler {
             "reasoning" => self.handle_reasoning_command(&parts).await,
             "fileapi" => self.handle_fileapi_command(&parts).await,
             "trace" => self.handle_trace_command(&parts).await,
+            "rebuild-index" => self.handle_rebuild_index_command(provider).await,
             _ => vec![self.create_message(
                 format!("Unknown command: /{}", command),
                 MessageSender::System,
@@ -157,6 +160,18 @@ impl CommandHandler {
                     "Trace logging: {}. Usage: /trace <on|off>",
                     if current_trace { "enabled" } else { "disabled" }
                 ),
+                MessageSender::System,
+            )]
+        }
+    }
+
+    async fn handle_rebuild_index_command(&self, provider: Option<&dyn AiProvider>) -> Vec<ChatMessage> {
+        if let Some(provider) = provider {
+            let rebuild_command = RebuildIndexCommand::new(self.state.clone());
+            rebuild_command.execute(provider).await
+        } else {
+            vec![self.create_message(
+                "❌ AI provider not available for indexing".to_string(),
                 MessageSender::System,
             )]
         }

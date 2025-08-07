@@ -7,5 +7,5 @@ Cargo.lock
 # Project-specific directories
 .brazil/
 
-# Tycode trace files
-.tycode/trace
+# Tycode trace and index files
+.tycode/

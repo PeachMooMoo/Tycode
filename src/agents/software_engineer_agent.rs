@@ -41,7 +41,7 @@ Always follow this workflow in order. Do not skip steps. Always get user approva
     }
 
     fn preferred_model(&self) -> Option<Model> {
-        Some(Model::ClaudeSonnet4)
+        Some(Model::ClaudeOpus41)
     }
 
     fn available_tools(&self) -> Vec<ToolType> {
