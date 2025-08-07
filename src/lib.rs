@@ -9,6 +9,7 @@ pub mod agents;
 pub mod ai;
 pub mod aws;
 pub mod chat;
+pub mod cli;
 pub mod config;
 pub mod db;
 pub mod indexing;

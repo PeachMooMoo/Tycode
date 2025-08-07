@@ -58,9 +58,18 @@ textwrap = "0.16"
 tui-scrollview = "0.5.1"
 tui-textarea = "0.7.0"
 
+# CLI dependencies
+rustyline = "14.0"
+colored = "2.1"
+indicatif = "0.17"
+
 [dev-dependencies]
 tempfile = "3.8"
 
 [[bin]]
 name = "tycode-chat"
 path = "src/terminal/main.rs"
+
+[[bin]]
+name = "tycode-cli"
+path = "src/cli/main.rs"

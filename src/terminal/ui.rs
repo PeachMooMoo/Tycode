@@ -1,7 +1,4 @@
-use crate::terminal::{
-    events::ChatMessage,
-    splash::{TIGER_ASCII, TYCODE_ASCII},
-};
+use crate::terminal::{events::ChatMessage, splash::TYCODE_ASCII};
 use ratatui::prelude::StatefulWidget;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect, Size},
@@ -409,19 +406,22 @@ impl UI {
             Line::from(format!("Model: {}", model.name())),
             Line::from(format!(
                 "Max Tokens: {}",
-                tunings.max_tokens
+                tunings
+                    .max_tokens
                     .map(|t| t.to_string())
                     .unwrap_or_else(|| "Default".to_string())
             )),
             Line::from(format!(
                 "Temperature: {}",
-                tunings.temperature
+                tunings
+                    .temperature
                     .map(|t| format!("{:.2}", t))
                     .unwrap_or_else(|| "Default".to_string())
             )),
             Line::from(format!(
                 "Top-P: {}",
-                tunings.top_p
+                tunings
+                    .top_p
                     .map(|p| format!("{:.2}", p))
                     .unwrap_or_else(|| "Default".to_string())
             )),
@@ -467,16 +467,6 @@ impl UI {
             splash_lines.push(Line::from(Span::styled(
                 line.to_string(),
                 Style::default().fg(Color::Yellow),
-            )));
-        }
-
-        splash_lines.push(Line::from(""));
-
-        // Add tiger ASCII art lines in orange
-        for line in TIGER_ASCII.lines() {
-            splash_lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(Color::Rgb(255, 165, 0)), // Orange color
             )));
         }
 
