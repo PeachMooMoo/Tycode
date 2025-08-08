@@ -198,7 +198,7 @@ impl CliApp {
                 // Display the message using the formatter
                 match message.sender {
                     MessageSender::User => {
-                        self.formatter.print_user(&message.content);
+                        // Skip printing user messages - they're already visible from input
                     }
                     MessageSender::Assistant => {
                         // Display reasoning first if present

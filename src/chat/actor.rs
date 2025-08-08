@@ -246,8 +246,8 @@ impl ChatActor {
                             self.current_agent_mut().conversation.push(Message {
                                 role: MessageRole::User,
                                 content: vec![
-                                    ContentBlock::Text("Here is the tool result:".to_string()),
                                     ContentBlock::ToolResult(result),
+                                    ContentBlock::Text("Here is the tool result:".to_string()),
                                 ]
                                 .into(),
                             });

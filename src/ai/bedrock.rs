@@ -58,18 +58,6 @@ impl BedrockProvider {
             };
 
             let mut content_blocks = Vec::new();
-
-            let previous_tool_uses = if msg_idx > 0 {
-                messages[msg_idx - 1]
-                    .content
-                    .tool_uses()
-                    .iter()
-                    .map(|tu| tu.id.clone())
-                    .collect::<std::collections::HashSet<_>>()
-            } else {
-                std::collections::HashSet::new()
-            };
-
             for block in msg.content.blocks() {
                 match block {
                     ContentBlock::Text(text) => {
@@ -79,8 +67,10 @@ impl BedrockProvider {
                     }
                     ContentBlock::ReasoningContent(reasoning) => {
                         // Reconstruct the ReasoningContent block in the proper format
-                        tracing::debug!("Converting reasoning content block back to Bedrock format");
-                        
+                        tracing::debug!(
+                            "Converting reasoning content block back to Bedrock format"
+                        );
+
                         let reasoning_content = if let Some(blob) = &reasoning.blob {
                             // This is redacted content - reconstruct from blob
                             tracing::debug!("Creating redacted reasoning content from blob");
@@ -92,27 +82,26 @@ impl BedrockProvider {
                                 reasoning.text.len(),
                                 reasoning.signature.is_some()
                             );
-                            
-                            let mut text_block_builder = ReasoningTextBlock::builder()
-                                .text(&reasoning.text);
-                            
+
+                            let mut text_block_builder =
+                                ReasoningTextBlock::builder().text(&reasoning.text);
+
                             if let Some(signature) = &reasoning.signature {
                                 text_block_builder = text_block_builder.signature(signature);
                             }
-                            
-                            let text_block = text_block_builder
-                                .build()
-                                .map_err(|e| {
-                                    AiError::internal(format!(
-                                        "Failed to build reasoning text block: {:?}",
-                                        e
-                                    ))
-                                })?;
-                            
+
+                            let text_block = text_block_builder.build().map_err(|e| {
+                                AiError::internal(format!(
+                                    "Failed to build reasoning text block: {:?}",
+                                    e
+                                ))
+                            })?;
+
                             ReasoningContentBlock::ReasoningText(text_block)
                         };
-                        
-                        content_blocks.push(BedrockContentBlock::ReasoningContent(reasoning_content));
+
+                        content_blocks
+                            .push(BedrockContentBlock::ReasoningContent(reasoning_content));
                     }
                     ContentBlock::ToolUse(tool_use) => {
                         let tool_use_block = ToolUseBlock::builder()
@@ -129,24 +118,17 @@ impl BedrockProvider {
                         content_blocks.push(BedrockContentBlock::ToolUse(tool_use_block));
                     }
                     ContentBlock::ToolResult(tool_result) => {
-                        if previous_tool_uses.contains(&tool_result.tool_use_id) {
-                            let tool_result_block = ToolResultBlock::builder()
-                                .tool_use_id(&tool_result.tool_use_id)
-                                .content(ToolResultContentBlock::Text(tool_result.content.clone()))
-                                .build()
-                                .map_err(|e| {
-                                    AiError::internal(format!(
-                                        "Failed to build tool result block: {:?}",
-                                        e
-                                    ))
-                                })?;
-                            content_blocks.push(BedrockContentBlock::ToolResult(tool_result_block));
-                        } else {
-                            tracing::warn!(
-                                "Skipping orphaned tool result {} - no corresponding tool use in previous message",
-                                tool_result.tool_use_id
-                            );
-                        }
+                        let tool_result_block = ToolResultBlock::builder()
+                            .tool_use_id(&tool_result.tool_use_id)
+                            .content(ToolResultContentBlock::Text(tool_result.content.clone()))
+                            .build()
+                            .map_err(|e| {
+                                AiError::internal(format!(
+                                    "Failed to build tool result block: {:?}",
+                                    e
+                                ))
+                            })?;
+                        content_blocks.push(BedrockContentBlock::ToolResult(tool_result_block));
                     }
                 }
             }
