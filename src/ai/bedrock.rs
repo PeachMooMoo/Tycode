@@ -1,11 +1,12 @@
 use aws_sdk_bedrockruntime::{
     types::{
-        ContentBlock as BedrockContentBlock, Message as BedrockMessage, SystemContentBlock, Tool,
-        ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
-        ToolSpecification, ToolUseBlock,
+        ContentBlock as BedrockContentBlock, Message as BedrockMessage, ReasoningContentBlock,
+        ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration, ToolInputSchema,
+        ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
     },
     Client as BedrockClient,
 };
+use aws_smithy_types::Blob;
 use serde_json::json;
 
 use crate::ai::{error::AiError, provider::AiProvider, types::*};
@@ -77,10 +78,41 @@ impl BedrockProvider {
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {
-                        content_blocks.push(BedrockContentBlock::Text(format!(
-                            "<thinking>\n{}\n</thinking>",
-                            reasoning.text
-                        )));
+                        // Reconstruct the ReasoningContent block in the proper format
+                        tracing::debug!("Converting reasoning content block back to Bedrock format");
+                        
+                        let reasoning_content = if let Some(blob) = &reasoning.blob {
+                            // This is redacted content - reconstruct from blob
+                            tracing::debug!("Creating redacted reasoning content from blob");
+                            ReasoningContentBlock::RedactedContent(Blob::new(blob.clone()))
+                        } else {
+                            // This is reasoning text - reconstruct with text and optional signature
+                            tracing::debug!(
+                                "Creating reasoning text block with {} chars, signature: {}",
+                                reasoning.text.len(),
+                                reasoning.signature.is_some()
+                            );
+                            
+                            let mut text_block_builder = ReasoningTextBlock::builder()
+                                .text(&reasoning.text);
+                            
+                            if let Some(signature) = &reasoning.signature {
+                                text_block_builder = text_block_builder.signature(signature);
+                            }
+                            
+                            let text_block = text_block_builder
+                                .build()
+                                .map_err(|e| {
+                                    AiError::internal(format!(
+                                        "Failed to build reasoning text block: {:?}",
+                                        e
+                                    ))
+                                })?;
+                            
+                            ReasoningContentBlock::ReasoningText(text_block)
+                        };
+                        
+                        content_blocks.push(BedrockContentBlock::ReasoningContent(reasoning_content));
                     }
                     ContentBlock::ToolUse(tool_use) => {
                         let tool_use_block = ToolUseBlock::builder()
@@ -185,7 +217,11 @@ impl BedrockProvider {
 #[async_trait::async_trait]
 impl AiProvider for BedrockProvider {
     fn supported_models(&self) -> Vec<Model> {
-        vec![Model::ClaudeOpus41, Model::ClaudeSonnet4, Model::ClaudeOpus4]
+        vec![
+            Model::ClaudeOpus41,
+            Model::ClaudeSonnet4,
+            Model::ClaudeOpus4,
+        ]
     }
 
     async fn converse(
@@ -193,11 +229,11 @@ impl AiProvider for BedrockProvider {
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
         request
-            .tunings
+            .model
             .validate()
             .map_err(|e| AiError::invalid_request(&e))?;
 
-        let model_id = self.get_bedrock_model_id(&request.model)?;
+        let model_id = self.get_bedrock_model_id(&request.model.model)?;
         let bedrock_messages = self.convert_to_bedrock_messages(&request.messages)?;
 
         tracing::debug!(?model_id, "Using Bedrock Converse API");
@@ -212,15 +248,15 @@ impl AiProvider for BedrockProvider {
         let mut inference_config_builder =
             aws_sdk_bedrockruntime::types::InferenceConfiguration::builder();
 
-        if let Some(max_tokens) = request.tunings.max_tokens {
+        if let Some(max_tokens) = request.model.max_tokens {
             inference_config_builder = inference_config_builder.max_tokens(max_tokens as i32);
         }
 
-        if let Some(temperature) = request.tunings.temperature {
+        if let Some(temperature) = request.model.temperature {
             inference_config_builder = inference_config_builder.temperature(temperature);
         }
 
-        if let Some(top_p) = request.tunings.top_p {
+        if let Some(top_p) = request.model.top_p {
             inference_config_builder = inference_config_builder.top_p(top_p);
         }
 
@@ -231,7 +267,7 @@ impl AiProvider for BedrockProvider {
 
         converse_request = converse_request.inference_config(inference_config_builder.build());
 
-        if let Some(reasoning_budget) = request.tunings.reasoning_budget {
+        if let Some(reasoning_budget) = request.model.reasoning_budget {
             tracing::info!(
                 "🧠 Enabling reasoning with budget {} tokens",
                 reasoning_budget

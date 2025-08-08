@@ -1,6 +1,6 @@
 use crate::ai::{
     bedrock::BedrockProvider,
-    types::{Model, ModelTunings},
+    types::{Model, ModelSettings},
 };
 use crate::chat::{
     actor::{ChatActor, ChatActorMessage},
@@ -26,10 +26,10 @@ impl App {
     pub async fn new(
         provider: BedrockProvider,
         model: Model,
-        system_prompt: String,
-        tunings: ModelTunings,
+        _system_prompt: String,
+        _tunings: ModelSettings,
     ) -> Result<Self> {
-        let state = SharedState::new(model, system_prompt.clone(), tunings);
+        let state = SharedState::new();
         let (actor_tx, actor_rx) = mpsc::unbounded_channel();
 
         let workspace_root = env::current_dir()?;
@@ -81,6 +81,7 @@ impl App {
                 timestamp: Instant::now(),
                 reasoning: None,
                 tool_calls: Vec::new(),
+                model_info: None,
             });
         });
 
@@ -309,10 +310,12 @@ impl App {
         let show_settings = state.show_settings;
 
         // Get chat-related values from chat state
-        let model = self.state.chat_state().get_model();
-        let tunings = self.state.chat_state().get_tunings();
-        let system_prompt = self.state.chat_state().get_system_prompt();
         let file_modification_api = self.state.chat_state().get_file_modification_api();
+
+        // Use default values for model and tunings since they're no longer managed by chat state
+        let model = Model::default();
+        let tunings = ModelSettings::default();
+        let system_prompt = "System prompt managed by settings".to_string();
 
         self.ui.render_all(
             f,

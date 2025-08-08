@@ -5,6 +5,8 @@ pub enum ToolType {
     ListFiles,
     SearchFiles,
     ModifyFile,
+    ExecuteCommand,
+    DeleteFile,
 }
 
 impl ToolType {
@@ -15,6 +17,8 @@ impl ToolType {
             Self::ListFiles => "list_files",
             Self::SearchFiles => "search_files",
             Self::ModifyFile => "modify_file",
+            Self::ExecuteCommand => "execute_command",
+            Self::DeleteFile => "delete_file",
         }
     }
 
@@ -25,6 +29,8 @@ impl ToolType {
             "list_files" => Some(Self::ListFiles),
             "search_files" => Some(Self::SearchFiles),
             "modify_file" | "apply_patch" | "replace_in_file" => Some(Self::ModifyFile),
+            "execute_command" => Some(Self::ExecuteCommand),
+            "delete_file" => Some(Self::DeleteFile),
             _ => None,
         }
     }

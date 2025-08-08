@@ -6,13 +6,16 @@ use crate::ai::{
 };
 use crate::chat::{
     commands::CommandHandler,
-    events::{ChatMessage, MessageSender},
+    events::{ChatMessage, MessageSender, ModelInfo, ModelSource},
     state::SharedChatState,
 };
+use crate::settings::SettingsManager;
 use crate::tools::registry::ToolRegistry;
+use crate::ModelSettings;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -31,6 +34,7 @@ pub struct ChatActor {
     agent_stack: Vec<ActiveAgent>,
     rx: mpsc::UnboundedReceiver<ChatActorMessage>,
     command_handler: CommandHandler,
+    settings: Option<Arc<SettingsManager>>,
 }
 
 impl ChatActor {
@@ -39,6 +43,16 @@ impl ChatActor {
         provider: BedrockProvider,
         workspace_root: PathBuf,
         rx: mpsc::UnboundedReceiver<ChatActorMessage>,
+    ) -> Self {
+        Self::with_settings(state, provider, workspace_root, rx, None)
+    }
+
+    pub fn with_settings(
+        state: SharedChatState,
+        provider: BedrockProvider,
+        workspace_root: PathBuf,
+        rx: mpsc::UnboundedReceiver<ChatActorMessage>,
+        settings: Option<Arc<SettingsManager>>,
     ) -> Self {
         let command_handler = CommandHandler::new(state.clone());
 
@@ -53,6 +67,7 @@ impl ChatActor {
             agent_stack,
             rx,
             command_handler,
+            settings,
         }
     }
 
@@ -122,6 +137,7 @@ impl ChatActor {
             timestamp: Instant::now(),
             reasoning: None,
             tool_calls: Vec::new(),
+            model_info: None,
         });
 
         self.current_agent_mut().conversation.push(Message {
@@ -133,7 +149,10 @@ impl ChatActor {
     }
 
     async fn handle_command(&mut self, command: &str) {
-        let messages = self.command_handler.handle_command(command, Some(&self.provider)).await;
+        let messages = self
+            .command_handler
+            .handle_command(command, Some(&self.provider))
+            .await;
 
         for message in messages {
             if message.content == "Conversation cleared." {
@@ -163,18 +182,16 @@ impl ChatActor {
             let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
             let conversation = self.current_agent().conversation.clone();
-            let model = current
-                .agent
-                .preferred_model()
-                .unwrap_or(self.state.get_model());
+
+            // Determine which model settings to use and track the source
+            let (model_settings, model_source) = self.determine_model_settings_and_source(current);
+
             let system_prompt = current.agent.system_prompt().to_string();
-            let tunings = self.state.get_tunings();
 
             let request = ConversationRequest {
                 messages: conversation,
-                model,
+                model: model_settings.clone(),
                 system_prompt,
-                tunings: tunings.clone(),
                 stop_sequences: vec![],
                 tools: available_tools,
             };
@@ -198,6 +215,10 @@ impl ChatActor {
                         timestamp: Instant::now(),
                         reasoning,
                         tool_calls: tool_calls.clone(),
+                        model_info: Some(ModelInfo {
+                            model: model_settings.model,
+                            source: model_source.clone(),
+                        }),
                     });
 
                     self.current_agent_mut().conversation.push(Message {
@@ -224,7 +245,11 @@ impl ChatActor {
 
                             self.current_agent_mut().conversation.push(Message {
                                 role: MessageRole::User,
-                                content: vec![ContentBlock::ToolResult(result)].into(),
+                                content: vec![
+                                    ContentBlock::Text("Here is the tool result:".to_string()),
+                                    ContentBlock::ToolResult(result),
+                                ]
+                                .into(),
                             });
                         }
                         continue;
@@ -255,6 +280,33 @@ impl ChatActor {
             timestamp: Instant::now(),
             reasoning: None,
             tool_calls: Vec::new(),
+            model_info: None,
         });
+    }
+
+    fn determine_model_settings_and_source(
+        &self,
+        agent: &ActiveAgent,
+    ) -> (ModelSettings, ModelSource) {
+        let agent_name = agent.agent.name();
+
+        // First check if user has configured settings for this agent
+        if let Some(settings) = &self.settings {
+            if let Some(agent_settings) = settings.settings().get_agent_settings(agent_name) {
+                return (
+                    ModelSettings {
+                        model: agent_settings.model,
+                        max_tokens: agent_settings.max_tokens,
+                        temperature: agent_settings.temperature,
+                        top_p: agent_settings.top_p,
+                        reasoning_budget: agent_settings.reasoning_budget,
+                    },
+                    ModelSource::UserConfigured,
+                );
+            }
+        }
+
+        // Otherwise use agent's preferred model settings
+        (agent.agent.preferred_model(), ModelSource::AgentPreference)
     }
 }

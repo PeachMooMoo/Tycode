@@ -1,4 +1,3 @@
-use crate::ai::types::{Model, ModelTunings};
 use crate::chat::{events::ChatMessage, state::SharedChatState};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -43,10 +42,10 @@ pub struct SharedState {
 }
 
 impl SharedState {
-    pub fn new(model: Model, system_prompt: String, tunings: ModelTunings) -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(State::new())),
-            chat_state: SharedChatState::new(model, system_prompt, tunings),
+            chat_state: SharedChatState::new(),
         }
     }
 

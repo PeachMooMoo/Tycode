@@ -1,5 +1,5 @@
 use crate::ai::provider::AiProvider;
-use crate::ai::types::{Content, ConversationRequest, Message, MessageRole, Model, ModelTunings};
+use crate::ai::types::{Content, ConversationRequest, Message, MessageRole, Model, ModelSettings};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -32,9 +32,11 @@ impl IndexAgent {
                 role: MessageRole::User,
                 content: Content::text_only(prompt),
             }],
-            model: self.model,
+            model: ModelSettings {
+                model: self.model,
+                ..ModelSettings::default()
+            },
             system_prompt: "You are an expert code indexing assistant.".to_string(),
-            tunings: ModelTunings::default(),
             stop_sequences: vec![],
             tools: vec![],
         };
@@ -72,9 +74,11 @@ impl IndexAgent {
                 role: MessageRole::User,
                 content: Content::text_only(prompt),
             }],
-            model: self.model,
+            model: ModelSettings {
+                model: self.model,
+                ..ModelSettings::default()
+            },
             system_prompt: "You are an expert code indexing assistant.".to_string(),
-            tunings: ModelTunings::default(),
             stop_sequences: vec![],
             tools: vec![],
         };

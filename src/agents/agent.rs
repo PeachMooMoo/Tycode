@@ -1,10 +1,10 @@
 use crate::agents::ToolType;
-use crate::ai::types::{Message, Model};
+use crate::ai::types::{Message, ModelSettings};
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn system_prompt(&self) -> &str;
-    fn preferred_model(&self) -> Option<Model>;
+    fn preferred_model(&self) -> ModelSettings;
     fn available_tools(&self) -> Vec<ToolType>;
 }
 

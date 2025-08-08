@@ -2,7 +2,7 @@ use serde_json::Value;
 use tycode::ai::bedrock::BedrockProvider;
 use tycode::ai::provider::AiProvider;
 use tycode::ai::types::{
-    Content, ContentBlock, ConversationRequest, Message, MessageRole, Model, ModelTunings,
+    Content, ContentBlock, ConversationRequest, Message, MessageRole, Model, ModelSettings,
 };
 
 struct DeterministicAITest {
@@ -118,9 +118,11 @@ Use the replace_in_file tool to make this exact replacement."#,
                 role: MessageRole::User,
                 content: Content::text_only(user_message),
             }],
-            model: Model::ClaudeSonnet4,
+            model: ModelSettings {
+                model: Model::ClaudeSonnet4,
+                ..ModelSettings::default()
+            },
             system_prompt: system_prompt.to_string(),
-            tunings: ModelTunings::default(),
             stop_sequences: vec![],
             tools: vec![self.get_mock_replace_tool_definition()],
         };
@@ -176,9 +178,11 @@ Use the apply_patch tool to make this exact replacement. The function starts aro
                 role: MessageRole::User,
                 content: Content::text_only(user_message),
             }],
-            model: Model::ClaudeSonnet4,
+            model: ModelSettings {
+                model: Model::ClaudeSonnet4,
+                ..ModelSettings::default()
+            },
             system_prompt: system_prompt.to_string(),
-            tunings: ModelTunings::default(),
             stop_sequences: vec![],
             tools: vec![self.get_mock_patch_tool_definition()],
         };

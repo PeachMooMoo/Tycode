@@ -1,7 +1,9 @@
 use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
 use crate::agents::ToolType;
 use crate::chat::state::FileModificationApi;
+use crate::tools::execute_command::ExecuteCommandTool;
 use crate::tools::file::apply_patch::ApplyPatchTool;
+use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::list_files::ListFilesTool;
 use crate::tools::file::read_file::ReadFileTool;
 use crate::tools::file::replace_in_file::ReplaceInFileTool;
@@ -25,7 +27,8 @@ impl ToolRegistry {
             file_modification_api: file_modification_api.clone(),
         };
 
-        registry.register_file_tools(workspace_root, file_modification_api);
+        registry.register_file_tools(workspace_root.clone(), file_modification_api);
+        registry.register_command_tools(workspace_root);
         registry
     }
 
@@ -34,13 +37,12 @@ impl ToolRegistry {
         workspace_root: PathBuf,
         file_modification_api: FileModificationApi,
     ) {
-        // Register common file tools
         self.register_tool(Arc::new(ReadFileTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(WriteFileTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(ListFilesTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(SearchFilesTool::new(workspace_root.clone())));
+        self.register_tool(Arc::new(DeleteFileTool::new(workspace_root.clone())));
 
-        // Register only the enabled file modification tool
         match file_modification_api {
             FileModificationApi::Patch => {
                 debug!("Registering ApplyPatchTool for Patch API");
@@ -53,11 +55,16 @@ impl ToolRegistry {
         }
     }
 
+    fn register_command_tools(&mut self, workspace_root: PathBuf) {
+        self.register_tool(Arc::new(ExecuteCommandTool::new(workspace_root)));
+    }
+
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
         let name = tool.name().to_string();
         debug!(tool_name = %name, "Registering tool");
         self.tools.insert(name, tool);
     }
+
 
     /// Maps abstract tool types to concrete tool names based on configuration
     fn get_concrete_tool_name(&self, tool_type: ToolType) -> Option<&'static str> {
@@ -72,6 +79,8 @@ impl ToolRegistry {
                     FileModificationApi::FindReplace => Some("replace_in_file"),
                 }
             }
+            ToolType::ExecuteCommand => Some("execute_command"),
+            ToolType::DeleteFile => Some("delete_file"),
         }
     }
 
@@ -163,12 +172,14 @@ mod tests {
         let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 7);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"apply_patch"));
+        assert!(tools.contains(&"execute_command"));
+        assert!(tools.contains(&"delete_file"));
         assert!(!tools.contains(&"replace_in_file"));
     }
 
@@ -181,12 +192,14 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 7);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"replace_in_file"));
+        assert!(tools.contains(&"execute_command"));
+        assert!(tools.contains(&"delete_file"));
         assert!(!tools.contains(&"apply_patch"));
     }
 
@@ -196,7 +209,7 @@ mod tests {
         let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
 
         let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 5);
+        assert_eq!(definitions.len(), 7);
 
         let read_file_def = definitions
             .iter()

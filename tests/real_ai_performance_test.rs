@@ -5,7 +5,7 @@ use tokio::time::sleep;
 use tycode::ai::bedrock::BedrockProvider;
 use tycode::ai::provider::AiProvider;
 use tycode::ai::types::{
-    Content, ContentBlock, ConversationRequest, Message, MessageRole, Model, ModelTunings,
+    Content, ContentBlock, ConversationRequest, Message, MessageRole, Model, ModelSettings,
 };
 use tycode::tools::file::apply_patch::ApplyPatchTool;
 use tycode::tools::file::replace_in_file::ReplaceInFileTool;
@@ -161,9 +161,11 @@ Make sure to get the line numbers exactly right."#,
                 role: MessageRole::User,
                 content: Content::text_only(user_message),
             }],
-            model: Model::ClaudeSonnet4,
+            model: ModelSettings {
+                model: Model::ClaudeSonnet4,
+                ..ModelSettings::default()
+            },
             system_prompt,
-            tunings: ModelTunings::default(),
             stop_sequences: vec![],
             tools: if use_search_replace {
                 vec![self.search_replace_tool.get_tool_definition()]

@@ -81,10 +81,12 @@ cargo run --bin tycode-chat -- --profile myprofile --region us-east-1
 ### Interactive Commands
 
 - `/help` - Show help dialog
-- `/settings` - Display current configuration  
+- `/settings` - Display current configuration and settings file
 - `/clear` - Clear conversation history
-- `/model <n>` - Switch AI model
+- `/model <name>` - Switch AI model
 - `/reasoning [budget]` - Enable/disable reasoning mode
+- `/fileapi <patch|findreplace>` - Set file modification API
+- `/trace <on|off>` - Enable/disable trace logging
 
 ### Keyboard Shortcuts
 
@@ -113,7 +115,10 @@ git clone <repository>
 cd tycode
 cargo build
 
-# Run the chat application
+# Run the CLI (recommended)
+cargo run --bin tycode-cli
+
+# Run the TUI chat application
 cargo run --bin tycode-chat
 
 # Run tests
@@ -123,13 +128,35 @@ cargo test
 cargo doc --open
 ```
 
+### Configuration
+
+TyCode now supports persistent configuration through `~/.tycode/settings.toml`:
+
+```toml
+[global]
+default_model = "claude-sonnet-4"
+file_modification_api = "FindReplace"
+
+[aws]
+profile = "cline"
+region = "us-west-2"
+
+[agents.software_engineer]
+model = "claude-opus-4-1"
+temperature = 0.7
+max_tokens = 4096
+```
+
+The settings file is automatically created on first run. Use `/settings` command to view current configuration. See [SETTINGS.md](SETTINGS.md) for detailed configuration options.
+
 ### AWS Configuration
 
 The application uses standard AWS credential resolution:
-1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-2. AWS credentials file (`~/.aws/credentials`)
-3. IAM roles (when running on EC2/ECS)
-4. AWS CLI profiles (specify with `--profile` flag)
+1. Settings file (`~/.tycode/settings.toml`)
+2. Command-line arguments (`--profile`, `--region`)
+3. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+4. AWS credentials file (`~/.aws/credentials`)
+5. IAM roles (when running on EC2/ECS)
 
 ## 📦 Key Dependencies
 

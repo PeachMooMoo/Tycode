@@ -48,6 +48,7 @@ impl RebuildIndexCommand {
                     timestamp: Instant::now(),
                     reasoning: None,
                     tool_calls: Vec::new(),
+                    model_info: None,
                 });
             }
         };
@@ -106,6 +107,7 @@ impl RebuildIndexCommand {
             timestamp: Instant::now(),
             reasoning: None,
             tool_calls: Vec::new(),
+            model_info: None,
         }
     }
 }

@@ -84,7 +84,7 @@ impl FileAccessManager {
         &self.workspace_root
     }
 
-    fn validate_path(&self, file_path: &str) -> Result<PathBuf> {
+    pub fn validate_path(&self, file_path: &str) -> Result<PathBuf> {
         let path = Path::new(file_path);
 
         let full_path = if path.is_absolute() {

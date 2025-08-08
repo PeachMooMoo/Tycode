@@ -14,7 +14,7 @@ use std::{
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_textarea::TextArea;
 
-use crate::ai::types::{Model, ModelTunings};
+use crate::ai::types::{Model, ModelSettings};
 
 pub struct UI {
     pub status_message: Option<(String, Instant)>,
@@ -38,7 +38,7 @@ impl UI {
         input: &TextArea,
         is_typing: bool,
         model: &Model,
-        tunings: &ModelTunings,
+        tunings: &ModelSettings,
         show_help: bool,
         show_settings: bool,
         system_prompt: &str,
@@ -291,7 +291,7 @@ impl UI {
         f: &mut Frame,
         area: Rect,
         model: &Model,
-        tunings: &ModelTunings,
+        tunings: &ModelSettings,
         is_typing: bool,
     ) {
         let mut status_text = format!(" {} | ", model.name());
@@ -392,7 +392,7 @@ impl UI {
         &self,
         f: &mut Frame,
         model: &Model,
-        tunings: &ModelTunings,
+        tunings: &ModelSettings,
         system_prompt: &str,
         file_modification_api: &crate::chat::state::FileModificationApi,
     ) {

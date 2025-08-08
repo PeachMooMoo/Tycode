@@ -15,7 +15,7 @@ use tracing_subscriber;
 use tycode::{
     ai::{
         bedrock::BedrockProvider,
-        types::{Model, ModelTunings},
+        types::{Model, ModelSettings},
     },
     terminal::App,
     timing::Timer,
@@ -80,7 +80,8 @@ async fn create_app(args: Args) -> Result<App> {
         "You are a helpful AI assistant. Provide clear, concise, and accurate responses."
             .to_string();
 
-    let tunings = ModelTunings {
+    let tunings = ModelSettings {
+        model,
         max_tokens: args.max_tokens,
         temperature: args.temperature,
         top_p: args.top_p,

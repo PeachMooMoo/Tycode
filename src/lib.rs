@@ -13,6 +13,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod indexing;
+pub mod settings;
 pub mod terminal;
 pub mod timing;
 pub mod tools;

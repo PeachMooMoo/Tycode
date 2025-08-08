@@ -1,5 +1,5 @@
-use crate::ai::types::{Model, ModelTunings};
 use crate::chat::events::{ChatEvent, ChatMessage};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -8,9 +8,6 @@ pub struct ChatState {
     pub messages: VecDeque<ChatMessage>,
     pub input_history: Vec<String>,
     pub is_typing: bool,
-    pub model: Model,
-    pub system_prompt: String,
-    pub tunings: ModelTunings,
     pub config: ChatConfig,
 }
 
@@ -29,21 +26,24 @@ impl Default for ChatConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FileModificationApi {
     Patch,
     FindReplace,
 }
 
+impl Default for FileModificationApi {
+    fn default() -> Self {
+        FileModificationApi::FindReplace
+    }
+}
+
 impl ChatState {
-    pub fn new(model: Model, system_prompt: String, tunings: ModelTunings) -> Self {
+    pub fn new() -> Self {
         Self {
             messages: VecDeque::new(),
             input_history: Vec::new(),
             is_typing: false,
-            model,
-            system_prompt,
-            tunings,
             config: ChatConfig::default(),
         }
     }
@@ -56,10 +56,10 @@ pub struct SharedChatState {
 }
 
 impl SharedChatState {
-    pub fn new(model: Model, system_prompt: String, tunings: ModelTunings) -> Self {
+    pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(100);
         Self {
-            inner: Arc::new(Mutex::new(ChatState::new(model, system_prompt, tunings))),
+            inner: Arc::new(Mutex::new(ChatState::new())),
             event_tx,
         }
     }
@@ -84,22 +84,6 @@ impl SharedChatState {
         let _ = self.event_tx.send(ChatEvent::TypingStatusChanged(typing));
     }
 
-    pub fn set_model(&self, model: Model) {
-        {
-            let mut state = self.inner.lock().unwrap();
-            state.model = model;
-        }
-        let _ = self.event_tx.send(ChatEvent::ModelChanged(model));
-    }
-
-    pub fn set_tunings(&self, tunings: ModelTunings) {
-        {
-            let mut state = self.inner.lock().unwrap();
-            state.tunings = tunings.clone();
-        }
-        let _ = self.event_tx.send(ChatEvent::TuningsChanged(tunings));
-    }
-
     pub fn add_to_history(&self, input: String) {
         let mut state = self.inner.lock().unwrap();
         if !input.trim().is_empty() {
@@ -113,21 +97,6 @@ impl SharedChatState {
             state.messages.clear();
         }
         let _ = self.event_tx.send(ChatEvent::ConversationCleared);
-    }
-
-    pub fn get_model(&self) -> Model {
-        let state = self.inner.lock().unwrap();
-        state.model
-    }
-
-    pub fn get_system_prompt(&self) -> String {
-        let state = self.inner.lock().unwrap();
-        state.system_prompt.clone()
-    }
-
-    pub fn get_tunings(&self) -> ModelTunings {
-        let state = self.inner.lock().unwrap();
-        state.tunings.clone()
     }
 
     pub fn get_messages(&self) -> VecDeque<ChatMessage> {

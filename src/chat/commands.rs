@@ -1,10 +1,17 @@
 use crate::ai::provider::AiProvider;
 use crate::chat::{
     events::{ChatMessage, MessageSender},
-    state::SharedChatState,
     rebuild_index_command::RebuildIndexCommand,
+    state::SharedChatState,
 };
 use std::time::Instant;
+
+#[derive(Clone, Debug)]
+pub struct CommandInfo {
+    pub name: String,
+    pub description: String,
+    pub usage: String,
+}
 
 pub struct CommandHandler {
     state: SharedChatState,
@@ -15,7 +22,52 @@ impl CommandHandler {
         Self { state }
     }
 
-    pub async fn handle_command(&self, command: &str, provider: Option<&dyn AiProvider>) -> Vec<ChatMessage> {
+    /// Get all available commands with their descriptions
+    pub fn get_available_commands(&self) -> Vec<CommandInfo> {
+        vec![
+            CommandInfo {
+                name: "clear".to_string(),
+                description: "Clear the conversation history".to_string(),
+                usage: "/clear".to_string(),
+            },
+            CommandInfo {
+                name: "fileapi".to_string(),
+                description: "Set the file modification API (patch or find-replace)".to_string(),
+                usage: "/fileapi <patch|findreplace>".to_string(),
+            },
+            CommandInfo {
+                name: "trace".to_string(),
+                description: "Enable/disable trace logging to .tycode/trace".to_string(),
+                usage: "/trace <on|off>".to_string(),
+            },
+            CommandInfo {
+                name: "rebuild-index".to_string(),
+                description: "Rebuild the codebase index for better context awareness".to_string(),
+                usage: "/rebuild-index".to_string(),
+            },
+            CommandInfo {
+                name: "settings".to_string(),
+                description: "Display current settings and configuration".to_string(),
+                usage: "/settings".to_string(),
+            },
+            CommandInfo {
+                name: "help".to_string(),
+                description: "Show this help message".to_string(),
+                usage: "/help".to_string(),
+            },
+            CommandInfo {
+                name: "quit".to_string(),
+                description: "Exit the application".to_string(),
+                usage: "/quit or /exit".to_string(),
+            },
+        ]
+    }
+
+    pub async fn handle_command(
+        &self,
+        command: &str,
+        provider: Option<&dyn AiProvider>,
+    ) -> Vec<ChatMessage> {
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             return vec![];
@@ -23,8 +75,6 @@ impl CommandHandler {
 
         match parts[0] {
             "clear" => self.handle_clear_command().await,
-            "model" => self.handle_model_command(&parts).await,
-            "reasoning" => self.handle_reasoning_command(&parts).await,
             "fileapi" => self.handle_fileapi_command(&parts).await,
             "trace" => self.handle_trace_command(&parts).await,
             "rebuild-index" => self.handle_rebuild_index_command(provider).await,
@@ -38,51 +88,6 @@ impl CommandHandler {
     async fn handle_clear_command(&self) -> Vec<ChatMessage> {
         self.state.clear_conversation();
         vec![self.create_message("Conversation cleared.".to_string(), MessageSender::System)]
-    }
-
-    async fn handle_model_command(&self, parts: &[&str]) -> Vec<ChatMessage> {
-        if let Some(model_name) = parts.get(1) {
-            if let Some(new_model) = crate::ai::types::Model::from_name(model_name) {
-                self.state.set_model(new_model);
-                vec![self.create_message(
-                    format!("Switched to model: {}", model_name),
-                    MessageSender::System,
-                )]
-            } else {
-                vec![self.create_message(
-                    format!("Unknown model: {}", model_name),
-                    MessageSender::System,
-                )]
-            }
-        } else {
-            vec![self.create_message("Usage: /model <name>".to_string(), MessageSender::System)]
-        }
-    }
-
-    async fn handle_reasoning_command(&self, parts: &[&str]) -> Vec<ChatMessage> {
-        if let Some(budget_str) = parts.get(1) {
-            if let Ok(budget) = budget_str.parse::<u32>() {
-                let mut tunings = self.state.get_tunings();
-                tunings.reasoning_budget = Some(budget);
-                self.state.set_tunings(tunings);
-
-                vec![self.create_message(
-                    format!("Reasoning enabled with budget: {} tokens", budget),
-                    MessageSender::System,
-                )]
-            } else {
-                vec![self.create_message(
-                    "Invalid reasoning budget".to_string(),
-                    MessageSender::System,
-                )]
-            }
-        } else {
-            let mut tunings = self.state.get_tunings();
-            tunings.reasoning_budget = None;
-            self.state.set_tunings(tunings);
-
-            vec![self.create_message("Reasoning disabled".to_string(), MessageSender::System)]
-        }
     }
 
     async fn handle_fileapi_command(&self, parts: &[&str]) -> Vec<ChatMessage> {
@@ -165,7 +170,10 @@ impl CommandHandler {
         }
     }
 
-    async fn handle_rebuild_index_command(&self, provider: Option<&dyn AiProvider>) -> Vec<ChatMessage> {
+    async fn handle_rebuild_index_command(
+        &self,
+        provider: Option<&dyn AiProvider>,
+    ) -> Vec<ChatMessage> {
         if let Some(provider) = provider {
             let rebuild_command = RebuildIndexCommand::new(self.state.clone());
             rebuild_command.execute(provider).await
@@ -188,6 +196,7 @@ impl CommandHandler {
             timestamp: Instant::now(),
             reasoning: None,
             tool_calls: Vec::new(),
+            model_info: None,
         }
     }
 }

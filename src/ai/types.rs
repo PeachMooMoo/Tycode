@@ -3,22 +3,22 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct ConversationRequest {
     pub messages: Vec<Message>,
-    pub model: Model,
+    pub model: ModelSettings,
     pub system_prompt: String,
-    pub tunings: ModelTunings,
     pub stop_sequences: Vec<String>,
     pub tools: Vec<ToolDefinition>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelTunings {
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ModelSettings {
+    pub model: Model,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub reasoning_budget: Option<u32>,
 }
 
-impl ModelTunings {
+impl ModelSettings {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(reasoning_budget) = self.reasoning_budget {
             if let Some(max_tokens) = self.max_tokens {
@@ -44,17 +44,6 @@ impl ModelTunings {
             }
         }
         Ok(())
-    }
-}
-
-impl Default for ModelTunings {
-    fn default() -> Self {
-        Self {
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-            reasoning_budget: None,
-        }
     }
 }
 
@@ -96,6 +85,25 @@ impl Model {
             "claude-haiku-3" => Some(Self::ClaudeHaiku3),
             _ => None,
         }
+    }
+
+    pub fn all_models() -> Vec<Self> {
+        vec![
+            Self::ClaudeOpus41,
+            Self::ClaudeOpus4,
+            Self::ClaudeSonnet4,
+            Self::ClaudeSonnet37,
+            Self::ClaudeHaiku35,
+            Self::ClaudeSonnet35V2,
+            Self::ClaudeSonnet35,
+            Self::ClaudeHaiku3,
+        ]
+    }
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Model::ClaudeSonnet4
     }
 }
 

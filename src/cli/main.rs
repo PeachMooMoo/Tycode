@@ -1,21 +1,16 @@
 use anyhow::Result;
 use clap::Parser;
+use std::sync::Arc;
 use tycode::{
-    ai::{
-        bedrock::BedrockProvider,
-        types::{Model, ModelTunings},
-    },
+    ai::{bedrock::BedrockProvider, types::ModelSettings},
     cli::CliApp,
+    settings::SettingsManager,
 };
 
 #[derive(Parser, Debug)]
 #[command(name = "tycode-cli")]
 #[command(about = "TyCode CLI - Native terminal chat interface")]
 struct Args {
-    /// Model to use (e.g., claude-sonnet-4, claude-opus-4, etc.)
-    #[arg(short, long, default_value = "claude-sonnet-4")]
-    model: String,
-
     /// AWS profile to use
     #[arg(short, long, default_value = "cline")]
     profile: String,
@@ -43,23 +38,10 @@ struct Args {
     /// Disable colors in output
     #[arg(long)]
     no_color: bool,
-}
 
-async fn setup_provider(args: &Args) -> Result<BedrockProvider> {
-    let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .profile_name(&args.profile)
-        .region(aws_config::Region::new(args.region.clone()))
-        .retry_config(
-            aws_config::retry::RetryConfig::adaptive()
-                .with_max_attempts(15)
-                .with_initial_backoff(std::time::Duration::from_millis(100))
-                .with_max_backoff(std::time::Duration::from_secs(1)),
-        )
-        .load()
-        .await;
-
-    let bedrock_client = aws_sdk_bedrockruntime::Client::new(&aws_config);
-    Ok(BedrockProvider::new(bedrock_client))
+    /// Don't load settings file
+    #[arg(long)]
+    no_settings: bool,
 }
 
 #[tokio::main]
@@ -77,20 +59,58 @@ async fn main() -> Result<()> {
             .init();
     }
 
-    // Parse model
-    let model = Model::from_name(&args.model)
-        .ok_or_else(|| anyhow::anyhow!("Invalid model: {}", args.model))?;
+    // Load settings if not disabled
+    let settings = if !args.no_settings {
+        match SettingsManager::new() {
+            Ok(mgr) => Some(Arc::new(mgr)),
+            Err(e) => {
+                eprintln!("Warning: Failed to load settings: {:?}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
-    // Set up provider
-    let provider = setup_provider(&args).await?;
+    // Determine AWS profile (CLI args override settings)
+    let aws_profile = if args.profile != "cline" {
+        args.profile.clone()
+    } else if let Some(ref settings_mgr) = settings {
+        settings_mgr
+            .settings()
+            .providers
+            .bedrock
+            .profile
+            .clone()
+            .unwrap_or_else(|| "cline".to_string())
+    } else {
+        "cline".to_string()
+    };
 
-    // Set up system prompt
-    let system_prompt =
-        "You are a helpful AI assistant. Provide clear, concise, and accurate responses."
-            .to_string();
+    // Use region from CLI args (no settings equivalent for region in new structure)
+    let aws_region = args.region.clone();
 
-    // Set up tunings
-    let tunings = ModelTunings {
+    // Set up provider with determined values
+    let provider = {
+        let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .profile_name(&aws_profile)
+            .region(aws_config::Region::new(aws_region))
+            .retry_config(
+                aws_config::retry::RetryConfig::adaptive()
+                    .with_max_attempts(15)
+                    .with_initial_backoff(std::time::Duration::from_millis(100))
+                    .with_max_backoff(std::time::Duration::from_secs(1)),
+            )
+            .load()
+            .await;
+
+        let bedrock_client = aws_sdk_bedrockruntime::Client::new(&aws_config);
+        BedrockProvider::new(bedrock_client)
+    };
+
+    // Set up tunings (CLI args take precedence)
+    let tunings = ModelSettings {
+        model: tycode::ai::types::Model::default(),
         max_tokens: args.max_tokens,
         temperature: args.temperature,
         top_p: args.top_p,
@@ -102,8 +122,8 @@ async fn main() -> Result<()> {
         return Err(anyhow::anyhow!("Invalid model tunings: {}", e));
     }
 
-    // Create and run the CLI app
-    let mut app = CliApp::new(provider, model, system_prompt, tunings).await?;
+    // Create and run the CLI app with settings
+    let mut app = CliApp::with_settings(provider, tunings, settings).await?;
     app.run().await?;
 
     Ok(())
