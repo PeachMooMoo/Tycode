@@ -36,14 +36,20 @@ impl Formatter {
 
     pub fn print_ai_with_model(&self, msg: &str, model_info: &crate::chat::events::ModelInfo) {
         use crate::chat::events::ModelSource;
-        
+
         let model_tag = match model_info.source {
-            ModelSource::UserConfigured => format!("using {} (configured)", model_info.model.name()),
-            ModelSource::AgentPreference => format!("using {} (agent default)", model_info.model.name()),
-            ModelSource::GlobalDefault => format!("using {} (global default)", model_info.model.name()),
+            ModelSource::UserConfigured => {
+                format!("using {} (configured)", model_info.model.name())
+            }
+            ModelSource::AgentPreference => {
+                format!("using {} (agent default)", model_info.model.name())
+            }
+            ModelSource::GlobalDefault => {
+                format!("using {} (global default)", model_info.model.name())
+            }
             ModelSource::CommandLine => format!("using {} (CLI arg)", model_info.model.name()),
         };
-        
+
         if self.use_colors {
             println!("\x1b[32m[AI]\x1b[0m \x1b[90m({})\x1b[0m {}", model_tag, msg);
         } else {
@@ -64,14 +70,6 @@ impl Formatter {
             "\x1b[35m>\x1b[0m ".to_string()
         } else {
             "> ".to_string()
-        }
-    }
-
-    pub fn print_thinking(&self) {
-        if self.use_colors {
-            println!("\x1b[33m⏳ AI is thinking...\x1b[0m");
-        } else {
-            println!("⏳ AI is thinking...");
         }
     }
 

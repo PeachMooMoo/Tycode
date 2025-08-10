@@ -2,29 +2,26 @@ use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::ToolExecutor;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct ReadFileTool {
-    file_access: FileAccessManager,
+    workspace_root: PathBuf,
+    file_manager: FileAccessManager,
 }
 
 impl ReadFileTool {
     pub fn new(workspace_root: PathBuf) -> Self {
+        let file_manager = FileAccessManager::new(workspace_root.clone());
         Self {
-            file_access: FileAccessManager::new(workspace_root),
+            workspace_root,
+            file_manager,
         }
     }
 
     /// Constructs the path to the index file for the given file path
     fn get_index_path(&self, file_path: &str) -> PathBuf {
-        let index_base = self
-            .file_access
-            .workspace_root()
-            .join(".tycode")
-            .join("index");
+        let index_base = self.workspace_root.join(".tycode").join("index");
 
         // Add .md extension to the file path for the index
         let index_file = format!("{}.md", file_path);
@@ -32,7 +29,7 @@ impl ReadFileTool {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl ToolExecutor for ReadFileTool {
     fn name(&self) -> &'static str {
         "read_file"
@@ -73,18 +70,24 @@ impl ToolExecutor for ReadFileTool {
         if summary {
             // Try to read from the index
             let index_path = self.get_index_path(file_path);
+            let index_path_str = index_path
+                .strip_prefix(&self.workspace_root)
+                .unwrap_or(&index_path)
+                .to_string_lossy()
+                .to_string();
 
-            if index_path.exists() && index_path.is_file() {
+            if self
+                .file_manager
+                .file_exists(&index_path_str)
+                .await
+                .unwrap_or(false)
+            {
                 // Read the summary from the index
-                let mut index_file = fs::File::open(&index_path)?;
-                let mut summary_content = String::new();
-                index_file.read_to_string(&mut summary_content)?;
-
-                let metadata = fs::metadata(&index_path)?;
+                let summary_content = self.file_manager.read_file(&index_path_str).await?;
 
                 return Ok(json!({
                     "content": summary_content,
-                    "size": metadata.len(),
+                    "size": summary_content.len(),
                     "path": file_path,
                     "is_summary": true
                 }));
@@ -94,9 +97,14 @@ impl ToolExecutor for ReadFileTool {
         }
 
         // Check if the path is a directory (for non-summary requests)
-        let file_path_resolved = self.file_access.workspace_root().join(file_path);
-        if file_path_resolved.is_dir() {
-            // For directories, we can't read them as files, but we might have a summary
+        // Try to list directory to check if it's a directory
+        if self
+            .file_manager
+            .list_directory(Some(file_path))
+            .await
+            .is_ok()
+        {
+            // It's a directory
             if !summary {
                 return Err(anyhow::anyhow!("Path is a directory, not a file: {}. Use summary=true to get directory summary if available.", file_path));
             } else {
@@ -109,15 +117,11 @@ impl ToolExecutor for ReadFileTool {
         }
 
         // Read the full file
-        let mut file = self.file_access.open_read(file_path)?;
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
-
-        let metadata = fs::metadata(&file_path_resolved)?;
+        let content = self.file_manager.read_file(file_path).await?;
 
         Ok(json!({
             "content": content,
-            "size": metadata.len(),
+            "size": content.len(),
             "path": file_path,
             "is_summary": false
         }))

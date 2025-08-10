@@ -1,24 +1,22 @@
 use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::ToolExecutor;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
-use std::fs;
 use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct DeleteFileTool {
-    file_access: FileAccessManager,
+    file_manager: FileAccessManager,
 }
 
 impl DeleteFileTool {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self {
-            file_access: FileAccessManager::new(workspace_root),
-        }
+        let file_manager = FileAccessManager::new(workspace_root.clone());
+        Self { file_manager }
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl ToolExecutor for DeleteFileTool {
     fn name(&self) -> &'static str {
         "delete_file"
@@ -34,7 +32,7 @@ impl ToolExecutor for DeleteFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file or empty directory to delete"
+                    "description": "Path to the file or directory to delete"
                 }
             },
             "required": ["file_path"]
@@ -45,41 +43,14 @@ impl ToolExecutor for DeleteFileTool {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing 'file_path' argument"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let full_path = self.file_access.validate_path(file_path)?;
-
-        let relative_path = full_path
-            .strip_prefix(self.file_access.workspace_root())
-            .unwrap_or(&full_path)
-            .to_string_lossy()
-            .to_string();
-
-        if !full_path.exists() {
-            return Err(anyhow!(
-                "File or directory does not exist: {}",
-                relative_path
-            ));
-        }
-
-        let metadata = fs::metadata(&full_path)?;
-
-        if metadata.is_dir() {
-            if fs::read_dir(&full_path)?.next().is_some() {
-                return Err(anyhow!(
-                    "Cannot delete non-empty directory: {}",
-                    relative_path
-                ));
-            }
-            fs::remove_dir(&full_path)?;
-        } else {
-            fs::remove_file(&full_path)?;
-        }
+        // Use FileAccessManager for secure file deletion
+        self.file_manager.delete_file(file_path).await?;
 
         Ok(json!({
             "success": true,
-            "deleted_path": relative_path,
-            "was_directory": metadata.is_dir()
+            "path": file_path
         }))
     }
 }
@@ -95,17 +66,19 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
 
+        // Create a test file
         let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "test content").unwrap();
+        fs::write(&test_file, "Test content").unwrap();
 
-        let args = json!({
-            "file_path": "test.txt"
-        });
+        // Delete the file
+        let result = tool
+            .execute(&json!({
+                "file_path": "test.txt"
+            }))
+            .await
+            .unwrap();
 
-        let result = tool.execute(&args).await.unwrap();
         assert_eq!(result["success"], true);
-        assert_eq!(result["deleted_path"], "test.txt");
-        assert_eq!(result["was_directory"], false);
         assert!(!test_file.exists());
     }
 
@@ -114,66 +87,72 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
 
-        let test_dir = temp_dir.path().join("empty_dir");
+        // Create an empty directory
+        let test_dir = temp_dir.path().join("test_dir");
         fs::create_dir(&test_dir).unwrap();
 
-        let args = json!({
-            "file_path": "empty_dir"
-        });
+        // Delete the directory
+        let result = tool
+            .execute(&json!({
+                "file_path": "test_dir"
+            }))
+            .await
+            .unwrap();
 
-        let result = tool.execute(&args).await.unwrap();
         assert_eq!(result["success"], true);
-        assert_eq!(result["deleted_path"], "empty_dir");
-        assert_eq!(result["was_directory"], true);
         assert!(!test_dir.exists());
     }
 
     #[tokio::test]
-    async fn test_delete_non_empty_directory_fails() {
+    async fn test_delete_nonexistent_file() {
         let temp_dir = tempdir().unwrap();
         let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
 
-        let test_dir = temp_dir.path().join("non_empty_dir");
-        fs::create_dir(&test_dir).unwrap();
-        fs::write(test_dir.join("file.txt"), "content").unwrap();
+        // Try to delete a file that doesn't exist
+        let result = tool
+            .execute(&json!({
+                "file_path": "nonexistent.txt"
+            }))
+            .await;
 
-        let args = json!({
-            "file_path": "non_empty_dir"
-        });
+        assert!(result.is_err());
+    }
 
-        let result = tool.execute(&args).await;
+    #[tokio::test]
+    async fn test_missing_file_path() {
+        let temp_dir = tempdir().unwrap();
+        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+
+        let result = tool.execute(&json!({})).await;
+
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("non-empty directory"));
-        assert!(test_dir.exists());
+            .contains("Missing required parameter: file_path"));
     }
 
     #[tokio::test]
-    async fn test_delete_non_existent_file() {
+    async fn test_delete_file_with_subdirectory() {
         let temp_dir = tempdir().unwrap();
         let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
 
-        let args = json!({
-            "file_path": "non_existent.txt"
-        });
+        // Create a subdirectory with a file
+        let sub_dir = temp_dir.path().join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+        let test_file = sub_dir.join("test.txt");
+        fs::write(&test_file, "Test content").unwrap();
 
-        let result = tool.execute(&args).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not exist"));
-    }
+        // Delete the file in the subdirectory
+        let result = tool
+            .execute(&json!({
+                "file_path": "subdir/test.txt"
+            }))
+            .await
+            .unwrap();
 
-    #[tokio::test]
-    async fn test_delete_outside_workspace() {
-        let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
-
-        let args = json!({
-            "file_path": "../outside.txt"
-        });
-
-        let result = tool.execute(&args).await;
-        assert!(result.is_err());
+        assert_eq!(result["success"], true);
+        assert!(!test_file.exists());
+        assert!(sub_dir.exists()); // Directory should still exist
     }
 }

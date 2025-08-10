@@ -1,6 +1,7 @@
 [workspace]
 members = ["tycode-core", "tycode-cli"]
 resolver = "2"
+# Note: tycode-vscode is a TypeScript/JavaScript project and not part of the Rust workspace
 
 [workspace.dependencies]
 # Async and concurrency  

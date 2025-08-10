@@ -4,6 +4,7 @@ use crate::ai::{
     provider::AiProvider,
     types::{Content, ConversationRequest, Message, MessageRole},
 };
+use crate::ai::{ContentBlock, ModelSettings};
 use crate::chat::{
     commands::CommandHandler,
     events::{ChatMessage, MessageSender, ModelInfo, ModelSource},
@@ -11,7 +12,6 @@ use crate::chat::{
 };
 use crate::settings::SettingsManager;
 use crate::tools::registry::ToolRegistry;
-use crate::{ContentBlock, ModelSettings};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::Arc;

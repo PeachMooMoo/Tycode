@@ -1,7 +1,6 @@
 use crate::agents::ToolType;
 use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
 use crate::chat::state::FileModificationApi;
-// use crate::tools::execute_command::ExecuteCommandTool;
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::list_files::ListFilesTool;
@@ -14,6 +13,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error};
+
+use super::execute_command::ExecuteCommandTool;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn ToolExecutor>>,
@@ -56,7 +57,7 @@ impl ToolRegistry {
     }
 
     fn register_command_tools(&mut self, workspace_root: PathBuf) {
-        // self.register_tool(Arc::new(ExecuteCommandTool::new(workspace_root)));
+        self.register_tool(Arc::new(ExecuteCommandTool::new(workspace_root)));
     }
 
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
@@ -169,13 +170,12 @@ mod tests {
         let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 6);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"apply_patch"));
-        assert!(tools.contains(&"execute_command"));
         assert!(tools.contains(&"delete_file"));
         assert!(!tools.contains(&"replace_in_file"));
     }
@@ -189,13 +189,12 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 6);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"replace_in_file"));
-        assert!(tools.contains(&"execute_command"));
         assert!(tools.contains(&"delete_file"));
         assert!(!tools.contains(&"apply_patch"));
     }
@@ -206,7 +205,7 @@ mod tests {
         let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
 
         let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 7);
+        assert_eq!(definitions.len(), 6);
 
         let read_file_def = definitions
             .iter()
@@ -227,7 +226,8 @@ mod tests {
             id: "test_id".to_string(),
             name: "read_file".to_string(),
             arguments: json!({
-                "file_path": "test.txt"
+                "file_path": "test.txt",
+                "summary": false
             }),
         };
 

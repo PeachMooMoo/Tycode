@@ -1,0 +1,108 @@
+{
+  "name": "tycode",
+  "displayName": "TyCode AI Assistant",
+  "description": "AI-powered coding assistant for VSCode",
+  "version": "0.1.0",
+  "publisher": "tycode",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Programming Languages", "Other"],
+  "keywords": ["AI", "assistant", "code", "chat"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tycode.openChat",
+        "title": "TyCode: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "tycode.askAboutSelection",
+        "title": "TyCode: Ask About Selection"
+      },
+      {
+        "command": "tycode.applyChanges",
+        "title": "TyCode: Apply Suggested Changes"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tycode-sidebar",
+          "title": "TyCode",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "tycode-sidebar": [
+        {
+          "type": "webview",
+          "id": "tycode.chatView",
+          "name": "Chat",
+          "contextualTitle": "TyCode Chat"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "tycode.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "tycode"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TyCode",
+      "properties": {
+        "tycode.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for AI service",
+          "scope": "application"
+        },
+        "tycode.model": {
+          "type": "string",
+          "default": "claude-3-5-sonnet-20241022",
+          "description": "AI model to use",
+          "enum": [
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229"
+          ]
+        },
+        "tycode.maxTokens": {
+          "type": "number",
+          "default": 4096,
+          "description": "Maximum tokens for AI responses"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "npm run build:wasm && npm run compile && webpack --mode production",
+    "build:wasm": "./build-wasm.sh",
+    "package": "vsce package",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.50.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "ts-loader": "^9.5.0",
+    "copy-webpack-plugin": "^11.0.0"
+  },
+  "dependencies": {}
+}

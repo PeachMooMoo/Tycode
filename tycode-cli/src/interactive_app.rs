@@ -1,57 +1,31 @@
+use crate::base_app::BaseApp;
+use crate::event_handler::EventFormatter;
 use crate::formatter::Formatter;
 use anyhow::Result;
 use rustyline::DefaultEditor;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
-use tycode_core::ai::{bedrock::BedrockProvider, types::ModelSettings};
-use tycode_core::chat::{
-    actor::{ChatActor, ChatActorMessage},
-    commands::CommandHandler,
-    events::{ChatEvent, MessageSender},
-    state::SharedChatState,
-};
+use tokio::sync::broadcast;
+use tycode_core::ai::bedrock::BedrockProvider;
+use tycode_core::ai::types::ModelSettings;
+use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::settings::SettingsManager;
 
-pub struct CliApp {
-    actor_tx: mpsc::UnboundedSender<ChatActorMessage>,
+pub struct InteractiveApp {
+    base: BaseApp,
     formatter: Formatter,
-    event_rx: broadcast::Receiver<ChatEvent>,
-    command_handler: CommandHandler,
-    settings: Option<Arc<SettingsManager>>,
 }
 
-impl CliApp {
-    pub async fn new(provider: BedrockProvider, tunings: ModelSettings) -> Result<Self> {
-        Self::with_settings(provider, tunings, None).await
-    }
-
-    pub async fn with_settings(
+impl InteractiveApp {
+    pub async fn new(
         provider: BedrockProvider,
-        _tunings: ModelSettings,
+        tunings: ModelSettings,
         settings: Option<Arc<SettingsManager>>,
     ) -> Result<Self> {
-        // Create shared chat state
-        let chat_state = SharedChatState::new();
-
-        // Create actor communication channel
-        let (actor_tx, actor_rx) = mpsc::unbounded_channel();
-
-        // Create and spawn the chat actor with settings
-        let actor =
-            ChatActor::with_settings(chat_state.clone(), provider, actor_rx, settings.clone());
-        tokio::spawn(async move {
-            actor.run().await;
-        });
-
-        // Subscribe to events but don't spawn a separate task
-        let event_rx = chat_state.subscribe();
+        let base = BaseApp::new(provider, tunings, settings).await?;
         let formatter = Formatter::new();
 
-        // Create command handler for getting command info
-        let command_handler = CommandHandler::new(chat_state.clone());
-
-        // Create the welcome message with settings info
-        let settings_info = if let Some(ref settings_mgr) = settings {
+        // Display welcome message
+        let settings_info = if let Some(ref settings_mgr) = base.settings {
             format!("📁 Settings: {}\n", settings_mgr.path().display())
         } else {
             String::new()
@@ -62,16 +36,9 @@ impl CliApp {
             settings_info
         );
 
-        // Display the welcome message immediately (only once)
         formatter.print_system(&welcome_message);
 
-        Ok(Self {
-            actor_tx,
-            formatter,
-            event_rx,
-            command_handler,
-            settings,
-        })
+        Ok(Self { base, formatter })
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -109,56 +76,39 @@ impl CliApp {
             rl.add_history_entry(&line)?;
 
             // Send input to chat actor
-            let _ = self
-                .actor_tx
-                .send(ChatActorMessage::UserInput(input.to_string()));
+            self.base.send_message(input.to_string()).await?;
 
             // Process AI response - wait for it to complete
             self.wait_for_response().await?;
         }
 
         // Shutdown the actor
-        let _ = self.actor_tx.send(ChatActorMessage::Shutdown);
+        self.base.shutdown().await?;
         println!("\nGoodbye!");
         Ok(())
     }
 
-    /// Wait for the AI to finish responding
     async fn wait_for_response(&mut self) -> Result<()> {
-        let mut ai_started = false;
-        let mut ai_finished = false;
-
-        while !ai_finished {
-            match self.event_rx.recv().await {
+        loop {
+            match self.base.event_rx.recv().await {
                 Ok(event) => {
-                    match &event {
-                        ChatEvent::TypingStatusChanged(typing) => {
-                            if *typing {
-                                ai_started = true;
-                            } else if ai_started {
-                                ai_finished = true;
-                            }
-                        }
+                    // Check if this completes the response
+                    let is_complete = match &event {
                         ChatEvent::MessageAdded(message) => match message.sender {
-                            MessageSender::Assistant => {
-                                ai_started = true;
-                                if message.tool_calls.is_empty() {
-                                    ai_finished = true;
-                                }
-                            }
-                            MessageSender::Error => {
-                                ai_finished = true;
-                            }
-                            MessageSender::System => {
-                                if !ai_started {
-                                    ai_finished = true;
-                                }
-                            }
-                            _ => {}
+                            MessageSender::Assistant if message.tool_calls.is_empty() => true,
+                            MessageSender::Error => true,
+                            MessageSender::System => true,
+                            _ => false,
                         },
-                        _ => {}
+                        _ => false,
+                    };
+
+                    // Format the event
+                    self.format_event(event)?;
+
+                    if is_complete {
+                        break;
                     }
-                    self.handle_event(event).await?;
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     continue;
@@ -172,64 +122,13 @@ impl CliApp {
         Ok(())
     }
 
-    /// Handle a chat event
-    async fn handle_event(&mut self, event: ChatEvent) -> Result<()> {
-        match event {
-            ChatEvent::MessageAdded(message) => {
-                // Display the message using the formatter
-                match message.sender {
-                    MessageSender::User => {
-                        // Skip printing user messages - they're already visible from input
-                    }
-                    MessageSender::Assistant => {
-                        // Display reasoning first if present
-                        if let Some(reasoning) = &message.reasoning {
-                            self.formatter
-                                .print_system(&format!("💭 Reasoning: {}", reasoning));
-                        }
-
-                        // Display the response with model info if available
-                        if let Some(ref model_info) = message.model_info {
-                            self.formatter
-                                .print_ai_with_model(&message.content, model_info);
-                        } else {
-                            self.formatter.print_ai(&message.content);
-                        }
-
-                        // Display tool calls if present
-                        for tool_call in &message.tool_calls {
-                            self.formatter
-                                .print_tool_call(&tool_call.name, &tool_call.arguments);
-                        }
-                    }
-                    MessageSender::System => {
-                        self.formatter.print_system(&message.content);
-                    }
-                    MessageSender::Error => {
-                        self.formatter.print_error(&message.content);
-                    }
-                }
-            }
-            ChatEvent::TypingStatusChanged(typing) => {
-                if typing {
-                    self.formatter.print_thinking();
-                }
-            }
-            _ => {
-                // Handle other events if needed
-            }
-        }
-        Ok(())
-    }
-
-    /// Print help information
     fn print_help(&self) {
         self.formatter.print_divider();
         self.formatter.print_system("📚 Available Commands:");
         self.formatter.print_system("");
 
         // Get all available commands from the command handler
-        let commands = self.command_handler.get_available_commands();
+        let commands = self.base.command_handler.get_available_commands();
 
         // Find the maximum command name length for alignment
         let max_name_len = commands.iter().map(|cmd| cmd.name.len()).max().unwrap_or(0);
@@ -256,13 +155,12 @@ impl CliApp {
         self.formatter.print_divider();
     }
 
-    /// Print current settings information
     fn print_settings(&self) {
         self.formatter.print_divider();
         self.formatter.print_system("📋 Current Settings:");
         self.formatter.print_system("");
 
-        if let Some(ref settings_mgr) = self.settings {
+        if let Some(ref settings_mgr) = self.base.settings {
             let settings = settings_mgr.settings();
 
             // Global settings
@@ -327,5 +225,49 @@ impl CliApp {
         }
 
         self.formatter.print_divider();
+    }
+}
+
+impl EventFormatter for InteractiveApp {
+    fn format_event(&mut self, event: ChatEvent) -> Result<()> {
+        match event {
+            ChatEvent::MessageAdded(message) => match message.sender {
+                MessageSender::Assistant => {
+                    // Display reasoning first if present
+                    if let Some(ref reasoning) = message.reasoning {
+                        self.formatter
+                            .print_system(&format!("💭 Reasoning: {}", reasoning.text));
+                    }
+
+                    // Display the response with model info if available
+                    if let Some(ref model_info) = message.model_info {
+                        self.formatter
+                            .print_ai_with_model(&message.content, model_info);
+                    } else {
+                        self.formatter.print_ai(&message.content);
+                    }
+
+                    // Display tool calls if present
+                    for tool_call in &message.tool_calls {
+                        self.formatter
+                            .print_tool_call(&tool_call.name, &tool_call.arguments);
+                    }
+                }
+                MessageSender::System => {
+                    self.formatter.print_system(&message.content);
+                }
+                MessageSender::Error => {
+                    self.formatter.print_error(&message.content);
+                }
+                MessageSender::User => {
+                    // Skip printing user messages - they're already visible from input
+                }
+            },
+            ChatEvent::TypingStatusChanged(_) => {
+                // Ignore typing status - not useful
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }

@@ -7,10 +7,15 @@ use tycode_core::{
     settings::SettingsManager,
 };
 
-mod app;
+mod base_app;
+mod event_handler;
 mod formatter;
+mod interactive_app;
+mod subprocess;
+mod subprocess_app;
 
-use crate::app::CliApp;
+use crate::interactive_app::InteractiveApp;
+use crate::subprocess_app::SubprocessApp;
 
 #[derive(Parser, Debug)]
 #[command(name = "tycode-cli")]
@@ -47,21 +52,39 @@ struct Args {
     /// Don't load settings file
     #[arg(long)]
     no_settings: bool,
+
+    /// Run in subprocess mode for VSCode extension
+    #[arg(long)]
+    subprocess: bool,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Use single-threaded runtime with LocalSet for spawn_local support
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async_main()).await
+    })
+}
+
+async fn async_main() -> Result<()> {
     let args = Args::parse();
 
-    if let Err(e) = chat::setup_trace_logging() {
-        eprintln!("Warning: Failed to setup trace logging: {:?}", e);
-    }
+    // In subprocess mode, don't print warnings to stderr
+    if !args.subprocess {
+        if let Err(e) = chat::setup_trace_logging() {
+            eprintln!("Warning: Failed to setup trace logging: {:?}", e);
+        }
 
-    if std::env::var("RUST_LOG").is_ok() {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_writer(std::io::stderr)
-            .init();
+        if std::env::var("RUST_LOG").is_ok() {
+            tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+                .with_writer(std::io::stderr)
+                .init();
+        }
     }
 
     // Load settings if not disabled
@@ -127,9 +150,16 @@ async fn main() -> Result<()> {
         return Err(anyhow::anyhow!("Invalid model tunings: {}", e));
     }
 
-    // Create and run the CLI app with settings
-    let mut app = CliApp::with_settings(provider, tunings, settings).await?;
-    app.run().await?;
+    // Create and run the appropriate app based on mode
+    if args.subprocess {
+        // Run in subprocess mode for VSCode extension
+        let mut app = SubprocessApp::new(provider, tunings, settings).await?;
+        app.run().await?;
+    } else {
+        // Run in interactive mode
+        let mut app = InteractiveApp::new(provider, tunings, settings).await?;
+        app.run().await?;
+    }
 
     Ok(())
 }

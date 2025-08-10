@@ -2,23 +2,21 @@ use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::ToolExecutor;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct WriteFileTool {
-    file_access: FileAccessManager,
+    file_manager: FileAccessManager,
 }
 
 impl WriteFileTool {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self {
-            file_access: FileAccessManager::new(workspace_root),
-        }
+        let file_manager = FileAccessManager::new(workspace_root.clone());
+        Self { file_manager }
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl ToolExecutor for WriteFileTool {
     fn name(&self) -> &'static str {
         "write_file"
@@ -56,8 +54,8 @@ impl ToolExecutor for WriteFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;
 
-        let mut file = self.file_access.open_write(file_path)?;
-        file.write_all(content.as_bytes())?;
+        // Use FileAccessManager for secure file writing
+        self.file_manager.write_file(file_path, content).await?;
 
         Ok(json!({
             "success": true,

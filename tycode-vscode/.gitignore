@@ -1,0 +1,10 @@
+out/
+node_modules/
+wasm/
+*.vsix
+.vscode-test/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+.DS_Store

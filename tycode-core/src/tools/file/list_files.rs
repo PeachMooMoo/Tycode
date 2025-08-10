@@ -2,23 +2,25 @@ use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::ToolExecutor;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::fs;
 use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct ListFilesTool {
-    file_access: FileAccessManager,
+    workspace_root: PathBuf,
+    file_manager: FileAccessManager,
 }
 
 impl ListFilesTool {
     pub fn new(workspace_root: PathBuf) -> Self {
+        let file_manager = FileAccessManager::new(workspace_root.clone());
         Self {
-            file_access: FileAccessManager::new(workspace_root),
+            workspace_root,
+            file_manager,
         }
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl ToolExecutor for ListFilesTool {
     fn name(&self) -> &'static str {
         "list_files"
@@ -44,23 +46,33 @@ impl ToolExecutor for ListFilesTool {
     async fn execute(&self, arguments: &Value) -> Result<Value> {
         let directory_path = arguments.get("directory_path").and_then(|v| v.as_str());
 
+        // Use FileAccessManager for secure directory listing
+        let paths = self.file_manager.list_directory(directory_path).await?;
+
         let mut entries = Vec::new();
-
-        let paths = self.file_access.list_directory(directory_path)?;
-
         for path in paths {
-            let metadata = fs::metadata(&path)?;
             let relative_path = path
-                .strip_prefix(self.file_access.workspace_root())
+                .strip_prefix(&self.workspace_root)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .to_string();
 
+            // Check if it's a directory by trying to list it
+            let relative_str = path
+                .strip_prefix(&self.workspace_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            let is_dir = self
+                .file_manager
+                .list_directory(Some(&relative_str))
+                .await
+                .is_ok();
+
             entries.push(json!({
                 "name": path.file_name().unwrap_or_default().to_string_lossy(),
                 "path": relative_path,
-                "type": if metadata.is_dir() { "directory" } else { "file" },
-                "size": if metadata.is_file() { Some(metadata.len()) } else { None::<u64> }
+                "type": if is_dir { "directory" } else { "file" },
             }));
         }
 
