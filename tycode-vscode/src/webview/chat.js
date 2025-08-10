@@ -198,6 +198,15 @@
         // Render inline code
         rendered = rendered.replace(/`([^`]+)`/g, '<code>$1</code>');
 
+        // Render markdown headers (h1-h6)
+        // Process headers from h6 to h1 to avoid conflicts
+        rendered = rendered.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+        rendered = rendered.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+        rendered = rendered.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+        rendered = rendered.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        rendered = rendered.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        rendered = rendered.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
         // Render links
         rendered = rendered.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 
@@ -209,6 +218,16 @@
 
         // Preserve line breaks
         rendered = rendered.replace(/\n/g, '<br>');
+        
+        // Clean up excessive spacing
+        // Remove <br> tags that were inserted inside headers
+        rendered = rendered.replace(/(<h[1-6]>.*?)<br>(.*?<\/h[1-6]>)/g, '$1 $2');
+        // Remove blank lines after headers
+        rendered = rendered.replace(/(<\/h[1-6]>)<br>/g, '$1');
+        // Reduce multiple consecutive line breaks to just one
+        rendered = rendered.replace(/(<br>){2,}/g, '<br>');
+        // Remove line break before headers (tighter spacing)
+        rendered = rendered.replace(/<br>(<h[1-6]>)/g, '$1');
 
         return rendered;
     }
