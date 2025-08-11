@@ -10,7 +10,8 @@ vsc-extension-quickstart.md
 **/*.ts
 node_modules/**
 *.vsix
-webpack.config.js
-build-wasm.sh
-wasm/*.d.ts
-wasm/package.json
+dev.sh
+BUILD.md
+
+# Don't ignore binaries - they need to be included in the package
+!binaries/**

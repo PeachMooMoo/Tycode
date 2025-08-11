@@ -26,7 +26,8 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                     reasoning: response.reasoning,
                     toolCalls: response.tool_calls || [],
                     model: response.model,
-                    isComplete: response.is_complete
+                    isComplete: response.is_complete,
+                    tokenUsage: response.token_usage
                 });
 
                 this._view.webview.postMessage({ type: 'hideTyping' });

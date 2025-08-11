@@ -175,6 +175,8 @@ impl CommandHandler {
             reasoning: None,
             tool_calls: Vec::new(),
             model_info: None,
+            context_info: None,
+            token_usage: None,
         }
     }
 }

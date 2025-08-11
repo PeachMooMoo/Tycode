@@ -1,25 +1,19 @@
 import * as vscode from 'vscode';
-import { ChatProvider } from './chatProvider';
-import { SubprocessBridge } from './subprocessBridge';
+import { MainProvider } from './mainProvider';
 
-let chatProvider: ChatProvider;
-let bridge: SubprocessBridge;
+let mainProvider: MainProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('TyCode extension is activating...');
 
-    // Initialize subprocess bridge
-    bridge = new SubprocessBridge(context);
-    await bridge.initialize();
-
-    // Create chat provider
-    chatProvider = new ChatProvider(context, bridge);
+    // Create main provider
+    mainProvider = new MainProvider(context);
 
     // Register webview provider
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
             'tycode.chatView',
-            chatProvider,
+            mainProvider,
             {
                 webviewOptions: {
                     retainContextWhenHidden: true
@@ -31,7 +25,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('tycode.openChat', () => {
-            chatProvider.openChat();
+            mainProvider.openChat();
         })
     );
 
@@ -50,8 +44,8 @@ export async function activate(context: vscode.ExtensionContext) {
             }
 
             // Open chat and send the selection
-            chatProvider.openChat();
-            await chatProvider.sendMessage(
+            mainProvider.openChat();
+            await mainProvider.sendMessageToActiveChat(
                 `Can you explain this code?\n\n\`\`\`${editor.document.languageId}\n${selection}\n\`\`\``
             );
         })
@@ -80,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-    if (bridge) {
-        bridge.dispose();
+    if (mainProvider) {
+        mainProvider.dispose();
     }
 }

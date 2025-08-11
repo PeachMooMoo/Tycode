@@ -7,8 +7,17 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["AI", "Programming Languages", "Other"],
-  "keywords": ["AI", "assistant", "code", "chat"],
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "AI",
+    "assistant",
+    "code",
+    "chat"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -83,11 +92,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run build",
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "build": "npm run build:wasm && npm run compile && webpack --mode production",
-    "build:wasm": "./build-wasm.sh",
+    "build": "npm run compile",
     "package": "vsce package",
     "test": "node ./out/test/runTest.js"
   },
@@ -98,11 +106,7 @@
     "@typescript-eslint/parser": "^6.0.0",
     "@vscode/vsce": "^2.22.0",
     "eslint": "^8.50.0",
-    "typescript": "^5.3.0",
-    "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4",
-    "ts-loader": "^9.5.0",
-    "copy-webpack-plugin": "^11.0.0"
+    "typescript": "^5.3.0"
   },
   "dependencies": {}
 }

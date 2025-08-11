@@ -1,0 +1,324 @@
+/* Import existing chat styles */
+@import url('./chat.css');
+
+/* Main container layout */
+.main-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+    background: var(--chat-background);
+}
+
+/* Welcome Screen Styles */
+.welcome-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    background: var(--chat-background);
+}
+
+.welcome-content {
+    text-align: center;
+    padding: 20px;
+    animation: fadeIn 0.5s ease-in;
+}
+
+.tiger-emoji {
+    font-size: 120px;
+    line-height: 1;
+    margin-bottom: 20px;
+    animation: bounceIn 0.6s ease-out;
+    filter: grayscale(100%);
+    user-select: none;
+}
+
+.welcome-title {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 0 0 30px 0;
+    color: var(--text-color);
+    letter-spacing: -1px;
+    animation: slideUp 0.5s ease-out 0.2s both;
+}
+
+.welcome-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    animation: slideUp 0.5s ease-out 0.3s both;
+}
+
+.welcome-button {
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    color: var(--text-color);
+}
+
+.welcome-button.primary {
+    background: var(--button-background);
+    color: var(--button-foreground);
+    border-color: var(--button-background);
+}
+
+.welcome-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.welcome-button.primary:hover {
+    background: var(--button-hover-background);
+    border-color: var(--button-hover-background);
+}
+
+/* Tab Bar Styles */
+.tab-bar {
+    display: flex;
+    align-items: center;
+    background: var(--input-background);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0;
+    min-height: 35px;
+    flex-shrink: 0;
+}
+
+.tabs {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+    gap: 1px;
+    padding: 0 4px;
+}
+
+.tabs::-webkit-scrollbar {
+    height: 3px;
+}
+
+.tabs::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 2px;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
+    position: relative;
+    min-width: 100px;
+    max-width: 200px;
+}
+
+.tab:hover {
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+.tab.active {
+    background: var(--chat-background);
+    border-bottom-color: var(--vscode-focusBorder);
+}
+
+.tab-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    color: var(--text-color);
+    margin-right: 8px;
+}
+
+.tab-close {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.tab-close:hover {
+    opacity: 1;
+    color: var(--text-color);
+}
+
+.new-tab-button {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 20px;
+    padding: 0 12px;
+    opacity: 0.6;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.new-tab-button:hover {
+    opacity: 1;
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+/* Conversations Container */
+.conversations-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.conversation-view {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--chat-background);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes bounceIn {
+    0% {
+        transform: scale(0.3);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    70% {
+        transform: scale(0.9);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 400px) {
+    .tiger-emoji {
+        font-size: 80px;
+    }
+    
+    .welcome-title {
+        font-size: 28px;
+    }
+    
+    .welcome-buttons {
+        flex-direction: column;
+        width: 100%;
+        max-width: 200px;
+        margin: 0 auto;
+    }
+    
+    .welcome-button {
+        width: 100%;
+    }
+}
+
+/* Override some chat.css styles for better integration */
+.conversation-view .chat-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--input-background);
+    flex-shrink: 0;
+}
+
+.conversation-view .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.conversation-view .input-container {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--border-color);
+    background: var(--input-background);
+    flex-shrink: 0;
+}
+
+/* Ensure proper layout for typing indicator */
+.conversation-view .typing-indicator {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 4px;
+}
+
+/* Tab animations */
+.tab {
+    animation: slideInTab 0.2s ease-out;
+}
+
+@keyframes slideInTab {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Tab close animation */
+.tab.closing {
+    animation: slideOutTab 0.2s ease-out forwards;
+}
+
+@keyframes slideOutTab {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+}

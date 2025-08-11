@@ -30,6 +30,20 @@ pub struct ChatMessage {
     pub reasoning: Option<crate::ai::types::ReasoningData>,
     pub tool_calls: Vec<crate::ai::types::ToolUseData>,
     pub model_info: Option<ModelInfo>,
+    pub context_info: Option<ContextInfo>,
+    pub token_usage: Option<crate::ai::types::TokenUsage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextInfo {
+    pub directory_list_bytes: usize,
+    pub files: Vec<FileInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    pub path: String,
+    pub bytes: usize,
 }
 
 #[derive(Debug, Clone)]

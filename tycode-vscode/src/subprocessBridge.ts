@@ -22,9 +22,7 @@ export class SubprocessBridge extends EventEmitter {
         }
 
         // Get the path to tycode binary
-        // In development, it's in target/debug
-        // In production, it should be bundled with the extension
-        const cliPath = path.join(this.context.extensionPath, '..', 'target', 'debug', 'tycode');
+        const cliPath = this.getBinaryPath();
 
         // Get AWS profile from settings
         const config = vscode.workspace.getConfiguration('tycode');
@@ -125,7 +123,9 @@ export class SubprocessBridge extends EventEmitter {
                     reasoning: message.reasoning,
                     tool_calls: message.tool_calls || [],
                     model: message.model,
-                    is_complete: message.is_complete
+                    is_complete: message.is_complete,
+                    context_info: message.context_info,
+                    token_usage: message.token_usage
                 });
                 break;
             case 'Event':
@@ -135,6 +135,49 @@ export class SubprocessBridge extends EventEmitter {
                 this.emit('error', message.error);
                 break;
         }
+    }
+
+    private getBinaryPath(): string {
+        const fs = require('fs');
+
+        // Determine platform-specific binary name
+        const platform = process.platform;
+        const arch = process.arch;
+        const binaryName = platform === 'win32' ? 'tycode.exe' : 'tycode';
+
+        // Map platform/arch to directory names
+        let platformDir: string;
+        if (platform === 'darwin') {
+            platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+        } else if (platform === 'linux') {
+            platformDir = 'linux-x64';
+        } else if (platform === 'win32') {
+            platformDir = 'win32-x64';
+        } else {
+            throw new Error(`Unsupported platform: ${platform}`);
+        }
+
+        // Try bundled binary first (production)
+        let binaryPath = path.join(this.context.extensionPath, 'binaries', platformDir, binaryName);
+        if (fs.existsSync(binaryPath)) {
+            console.log('Using bundled binary:', binaryPath);
+            return binaryPath;
+        }
+
+        // Fall back to development paths
+        const devPaths = [
+            path.join(this.context.extensionPath, '..', 'target', 'debug', binaryName),
+            path.join(this.context.extensionPath, '..', 'target', 'release', binaryName)
+        ];
+
+        for (const devPath of devPaths) {
+            if (fs.existsSync(devPath)) {
+                console.log('Using development binary:', devPath);
+                return devPath;
+            }
+        }
+
+        throw new Error(`tycode binary not found. Searched: ${binaryPath}, ${devPaths.join(', ')}`);
     }
 
     dispose(): void {

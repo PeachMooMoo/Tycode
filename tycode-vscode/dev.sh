@@ -109,10 +109,75 @@ case "$1" in
     package)
         echo -e "${YELLOW}Creating VSIX package...${NC}"
         
-        # Full build first
+        # Create binaries directory structure
+        echo -e "${YELLOW}Creating binaries directory structure...${NC}"
+        rm -rf binaries
+        mkdir -p binaries/{darwin-x64,darwin-arm64,linux-x64,win32-x64}
+        
+        # Build native Rust CLI for current platform first
         echo -e "${YELLOW}Building native Rust CLI (release mode)...${NC}"
         cd ..
         cargo build --release
+        
+        # Detect current platform and copy binary
+        CURRENT_PLATFORM=$(uname -s)
+        CURRENT_ARCH=$(uname -m)
+        
+        if [ "$CURRENT_PLATFORM" = "Darwin" ]; then
+            if [ "$CURRENT_ARCH" = "arm64" ]; then
+                echo -e "${GREEN}Copying macOS ARM64 binary...${NC}"
+                cp target/release/tycode tycode-vscode/binaries/darwin-arm64/tycode
+                chmod +x tycode-vscode/binaries/darwin-arm64/tycode
+            else
+                echo -e "${GREEN}Copying macOS x64 binary...${NC}"
+                cp target/release/tycode tycode-vscode/binaries/darwin-x64/tycode
+                chmod +x tycode-vscode/binaries/darwin-x64/tycode
+            fi
+        elif [ "$CURRENT_PLATFORM" = "Linux" ]; then
+            echo -e "${GREEN}Copying Linux x64 binary...${NC}"
+            cp target/release/tycode tycode-vscode/binaries/linux-x64/tycode
+            chmod +x tycode-vscode/binaries/linux-x64/tycode
+        fi
+        
+        # Try to build for other platforms if cross is installed
+        if command -v cross &> /dev/null; then
+            echo -e "${YELLOW}Cross compilation tool found, building for other platforms...${NC}"
+            
+            # Build for other platforms based on current platform
+            if [ "$CURRENT_PLATFORM" = "Darwin" ]; then
+                # On macOS, try to build universal binary
+                if [ "$CURRENT_ARCH" = "arm64" ]; then
+                    echo -e "${YELLOW}Building for macOS x64...${NC}"
+                    cargo build --release --target x86_64-apple-darwin 2>/dev/null && \
+                        cp target/x86_64-apple-darwin/release/tycode tycode-vscode/binaries/darwin-x64/tycode && \
+                        chmod +x tycode-vscode/binaries/darwin-x64/tycode || \
+                        echo -e "${YELLOW}Warning: Could not build for macOS x64${NC}"
+                else
+                    echo -e "${YELLOW}Building for macOS ARM64...${NC}"
+                    cargo build --release --target aarch64-apple-darwin 2>/dev/null && \
+                        cp target/aarch64-apple-darwin/release/tycode tycode-vscode/binaries/darwin-arm64/tycode && \
+                        chmod +x tycode-vscode/binaries/darwin-arm64/tycode || \
+                        echo -e "${YELLOW}Warning: Could not build for macOS ARM64${NC}"
+                fi
+                
+                # Try Linux cross-compilation
+                echo -e "${YELLOW}Building for Linux x64...${NC}"
+                cross build --release --target x86_64-unknown-linux-gnu 2>/dev/null && \
+                    cp target/x86_64-unknown-linux-gnu/release/tycode tycode-vscode/binaries/linux-x64/tycode && \
+                    chmod +x tycode-vscode/binaries/linux-x64/tycode || \
+                    echo -e "${YELLOW}Warning: Could not build for Linux x64${NC}"
+                    
+                # Try Windows cross-compilation
+                echo -e "${YELLOW}Building for Windows x64...${NC}"
+                cross build --release --target x86_64-pc-windows-gnu 2>/dev/null && \
+                    cp target/x86_64-pc-windows-gnu/release/tycode.exe tycode-vscode/binaries/win32-x64/tycode.exe || \
+                    echo -e "${YELLOW}Warning: Could not build for Windows x64${NC}"
+            fi
+        else
+            echo -e "${YELLOW}Note: Install 'cross' for cross-platform compilation${NC}"
+            echo -e "${YELLOW}  cargo install cross${NC}"
+        fi
+        
         cd tycode-vscode
         
         echo -e "${YELLOW}Compiling TypeScript...${NC}"
@@ -122,6 +187,10 @@ case "$1" in
         mkdir -p out/webview
         cp src/webview/*.css out/webview/ 2>/dev/null || true
         cp src/webview/*.js out/webview/ 2>/dev/null || true
+        
+        # Show which binaries were included
+        echo -e "${GREEN}Binaries included in package:${NC}"
+        ls -la binaries/*/tycode* 2>/dev/null || echo -e "${YELLOW}No binaries found${NC}"
         
         echo -e "${YELLOW}Creating VSIX package...${NC}"
         npm run package
@@ -165,24 +234,59 @@ case "$1" in
         fi
         ;;
         
+    build-universal)
+        echo -e "${YELLOW}Building universal macOS binary...${NC}"
+        
+        if [ "$(uname -s)" != "Darwin" ]; then
+            echo -e "${RED}Universal binary can only be built on macOS${NC}"
+            exit 1
+        fi
+        
+        cd ..
+        
+        # Build for both architectures
+        echo -e "${YELLOW}Building for x86_64...${NC}"
+        cargo build --release --target x86_64-apple-darwin
+        
+        echo -e "${YELLOW}Building for aarch64...${NC}"
+        cargo build --release --target aarch64-apple-darwin
+        
+        # Create universal binary
+        echo -e "${YELLOW}Creating universal binary...${NC}"
+        mkdir -p tycode-vscode/binaries/darwin-universal
+        lipo -create \
+            target/x86_64-apple-darwin/release/tycode \
+            target/aarch64-apple-darwin/release/tycode \
+            -output tycode-vscode/binaries/darwin-universal/tycode
+        
+        chmod +x tycode-vscode/binaries/darwin-universal/tycode
+        
+        echo -e "${GREEN}Universal binary created!${NC}"
+        file tycode-vscode/binaries/darwin-universal/tycode
+        
+        cd tycode-vscode
+        ;;
+        
     *)
-        echo "Usage: ./dev.sh {setup|build|quick-build|watch|package|test|clean|copy-webview}"
+        echo "Usage: ./dev.sh {setup|build|quick-build|watch|package|test|clean|copy-webview|build-universal}"
         echo ""
         echo "Commands:"
-        echo "  setup        - Install dependencies and set up development environment"
-        echo "  build        - Full build with native Rust CLI (release mode) and TypeScript"
-        echo "  quick-build  - Fast development build (debug mode)"
-        echo "  watch        - Start TypeScript watch mode for development"
-        echo "  package      - Create VSIX package for distribution"
-        echo "  test         - Run tests"
-        echo "  clean        - Remove build artifacts"
-        echo "  copy-webview - Copy webview HTML/CSS/JS files to output"
+        echo "  setup           - Install dependencies and set up development environment"
+        echo "  build           - Full build with native Rust CLI (release mode) and TypeScript"
+        echo "  quick-build     - Fast development build (debug mode)"
+        echo "  watch           - Start TypeScript watch mode for development"
+        echo "  package         - Create VSIX package for distribution"
+        echo "  test            - Run tests"
+        echo "  clean           - Remove build artifacts"
+        echo "  copy-webview    - Copy webview HTML/CSS/JS files to output"
+        echo "  build-universal - Build universal macOS binary (macOS only)"
         echo ""
         echo "Notes:"
         echo "  - The extension uses the native Rust CLI via subprocess bridge"
         echo "  - CLI binary location: ../target/debug/tycode (debug) or ../target/release/tycode (release)"
         echo "  - Use 'quick-build' for faster development iteration"
         echo "  - Use 'build' for production releases"
+        echo "  - For cross-platform packaging, install: cargo install cross"
         exit 1
         ;;
 esac

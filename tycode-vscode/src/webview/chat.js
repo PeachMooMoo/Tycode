@@ -45,7 +45,7 @@
     // Keep track of current AI response group
     let currentResponseGroup = null;
 
-    function displayMessage(role, content, details, model, isComplete, reasoning, toolCalls) {
+    function displayMessage(role, content, details, model, isComplete, reasoning, toolCalls, tokenUsage) {
         // Special handling for AI response components
         if (role === 'assistant') {
             // Start a new response group
@@ -63,6 +63,12 @@
                 const modelInfo = model ? `<div class="model-info">Model: ${model}</div>` : '';
                 const completionInfo = isComplete !== undefined ?
                     `<div class="completion-info">${isComplete ? '✅ Complete' : '⏳ Pending tool execution'}</div>` : '';
+
+                // Build token usage info if available
+                let tokenInfo = '';
+                if (tokenUsage) {
+                    tokenInfo = `<div class="token-info">📊 Tokens: ${tokenUsage.input_tokens} in, ${tokenUsage.output_tokens} out (${tokenUsage.total_tokens} total)</div>`;
+                }
 
                 // Build the reasoning section if present
                 let reasoningSection = '';
@@ -109,6 +115,7 @@
 
                 messageDiv.innerHTML = `
                     ${modelInfo}
+                    ${tokenInfo}
                     ${reasoningSection}
                     <div class="message-content">${renderContent(content)}</div>
                     ${toolCallsSection}
@@ -218,7 +225,7 @@
 
         // Preserve line breaks
         rendered = rendered.replace(/\n/g, '<br>');
-        
+
         // Clean up excessive spacing
         // Remove <br> tags that were inserted inside headers
         rendered = rendered.replace(/(<h[1-6]>.*?)<br>(.*?<\/h[1-6]>)/g, '$1 $2');
@@ -288,7 +295,8 @@
                     message.model,
                     message.isComplete,
                     message.reasoning,
-                    message.toolCalls
+                    message.toolCalls,
+                    message.tokenUsage
                 );
                 break;
             case 'showTyping':

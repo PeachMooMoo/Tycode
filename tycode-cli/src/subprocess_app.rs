@@ -128,12 +128,40 @@ impl SubprocessApp {
                         })
                         .collect();
 
+                    // Convert context info if present
+                    let context_info =
+                        msg.context_info
+                            .as_ref()
+                            .map(|ci| crate::subprocess::ContextInfo {
+                                directory_list_bytes: ci.directory_list_bytes,
+                                files: ci
+                                    .files
+                                    .iter()
+                                    .map(|f| crate::subprocess::FileInfo {
+                                        path: f.path.clone(),
+                                        bytes: f.bytes,
+                                    })
+                                    .collect(),
+                            });
+
+                    // Convert token usage if present
+                    let token_usage =
+                        msg.token_usage
+                            .as_ref()
+                            .map(|tu| crate::subprocess::TokenUsage {
+                                input_tokens: tu.input_tokens,
+                                output_tokens: tu.output_tokens,
+                                total_tokens: tu.total_tokens,
+                            });
+
                     Some(SubprocessMessage::Response {
                         content: msg.content,
                         reasoning: msg.reasoning.as_ref().map(|r| r.text.clone()),
                         tool_calls,
                         model: msg.model_info.as_ref().map(|m| m.model.name().to_string()),
                         is_complete: msg.tool_calls.is_empty(), // Complete if no tool calls
+                        context_info,
+                        token_usage,
                     })
                 }
                 MessageSender::System => Some(SubprocessMessage::Event {

@@ -7,7 +7,7 @@ use crate::ai::{
 use crate::ai::{ContentBlock, ModelSettings};
 use crate::chat::{
     commands::CommandHandler,
-    events::{ChatMessage, MessageSender, ModelInfo, ModelSource},
+    events::{ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource},
     state::SharedChatState,
 };
 use crate::settings::SettingsManager;
@@ -136,6 +136,8 @@ impl ChatActor {
             reasoning: None,
             tool_calls: Vec::new(),
             model_info: None,
+            context_info: None,
+            token_usage: None,
         });
 
         self.current_agent_mut().conversation.push(Message {
@@ -212,18 +214,36 @@ impl ChatActor {
             // Build messages for the request WITHOUT modifying the stored conversation
             let mut messages_for_request = Vec::new();
 
-            // Only add context if we have tracked files or it's the first message
-            let tracked_files = self.state.get_tracked_files();
-            if !tracked_files.is_empty() || self.current_agent().conversation.is_empty() {
-                let context_string = message_context.to_formatted_string();
+            let context_string = message_context.to_formatted_string();
 
-                // Add context as the first message (not stored in conversation history)
-                let context_message = Message {
-                    role: MessageRole::User,
-                    content: Content::text_only(format!("Current Context:\n{}", context_string)),
-                };
-                messages_for_request.push(context_message);
-            }
+            // Calculate directory list size (from relevant_files)
+            let dir_list_size = message_context
+                .relevant_files
+                .iter()
+                .map(|p| p.to_string_lossy().len() + 1) // +1 for newline
+                .sum::<usize>();
+
+            // Calculate file sizes
+            let files: Vec<FileInfo> = message_context
+                .tracked_file_contents
+                .iter()
+                .map(|(path, content)| FileInfo {
+                    path: path.to_string_lossy().to_string(),
+                    bytes: content.len(),
+                })
+                .collect();
+
+            let context_info = Some(ContextInfo {
+                directory_list_bytes: dir_list_size,
+                files,
+            });
+
+            // Add context as the first message (not stored in conversation history)
+            let context_message = Message {
+                role: MessageRole::User,
+                content: Content::text_only(format!("Current Context:\n{}", context_string)),
+            };
+            messages_for_request.push(context_message);
 
             // Add the actual conversation history
             messages_for_request.extend(self.current_agent().conversation.clone());
@@ -264,6 +284,8 @@ impl ChatActor {
                             model: model_settings.model,
                             source: model_source.clone(),
                         }),
+                        context_info: context_info.clone(),
+                        token_usage: Some(response.usage.clone()),
                     });
 
                     self.current_agent_mut().conversation.push(Message {
@@ -326,6 +348,8 @@ impl ChatActor {
             reasoning: None,
             tool_calls: Vec::new(),
             model_info: None,
+            context_info: None,
+            token_usage: None,
         });
     }
 

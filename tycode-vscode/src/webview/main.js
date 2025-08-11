@@ -1,0 +1,503 @@
+(function () {
+    const vscode = acquireVsCodeApi();
+
+    // State management
+    let conversations = new Map(); // id -> { title, messages, element }
+    let activeConversationId = null;
+
+    // DOM elements
+    const welcomeScreen = document.getElementById('welcome-screen');
+    const tabBar = document.getElementById('tab-bar');
+    const tabsContainer = document.getElementById('tabs');
+    const conversationsContainer = document.getElementById('conversations-container');
+    const newTabButton = document.getElementById('new-tab-button');
+    const welcomeNewChatButton = document.getElementById('welcome-new-chat');
+    const welcomeSettingsButton = document.getElementById('welcome-settings');
+
+    // Event listeners
+    newTabButton?.addEventListener('click', () => {
+        vscode.postMessage({ type: 'newChat' });
+    });
+
+    welcomeNewChatButton?.addEventListener('click', () => {
+        vscode.postMessage({ type: 'newChat' });
+    });
+
+    welcomeSettingsButton?.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openSettings' });
+    });
+
+    // Handle messages from extension
+    window.addEventListener('message', event => {
+        const message = event.data;
+
+        switch (message.type) {
+            case 'initialState':
+                handleInitialState(message);
+                break;
+            case 'conversationCreated':
+                handleConversationCreated(message);
+                break;
+            case 'conversationMessage':
+                handleConversationMessage(message);
+                break;
+            case 'activeConversationChanged':
+                handleActiveConversationChanged(message);
+                break;
+            case 'conversationClosed':
+                handleConversationClosed(message);
+                break;
+            case 'conversationTitleChanged':
+                handleConversationTitleChanged(message);
+                break;
+            case 'conversationCleared':
+                handleConversationCleared(message);
+                break;
+            case 'showTyping':
+                handleShowTyping(message);
+                break;
+            case 'conversationDisconnected':
+                handleConversationDisconnected(message);
+                break;
+        }
+    });
+
+    function handleInitialState(message) {
+        // Clear existing state
+        conversations.clear();
+        tabsContainer.innerHTML = '';
+        conversationsContainer.innerHTML = '';
+
+        // Load conversations
+        if (message.conversations && message.conversations.length > 0) {
+            for (const conv of message.conversations) {
+                createConversationUI(conv.id, conv.title);
+                
+                // Load existing messages
+                if (conv.messages) {
+                    for (const msg of conv.messages) {
+                        displayMessage(conv.id, msg);
+                    }
+                }
+            }
+
+            if (message.activeConversationId) {
+                setActiveConversation(message.activeConversationId);
+            }
+
+            showConversations();
+        } else {
+            showWelcomeScreen();
+        }
+    }
+
+    function handleConversationCreated(message) {
+        createConversationUI(message.id, message.title);
+        setActiveConversation(message.id);
+        showConversations();
+    }
+
+    function createConversationUI(id, title) {
+        // Create tab
+        const tab = document.createElement('div');
+        tab.className = 'tab';
+        tab.dataset.conversationId = id;
+        tab.innerHTML = `
+            <span class="tab-title">${escapeHtml(title)}</span>
+            <button class="tab-close" title="Close">×</button>
+        `;
+
+        tab.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('tab-close')) {
+                vscode.postMessage({ type: 'switchTab', conversationId: id });
+            }
+        });
+
+        tab.querySelector('.tab-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            vscode.postMessage({ type: 'closeTab', conversationId: id });
+        });
+
+        tabsContainer.appendChild(tab);
+
+        // Create conversation view
+        const conversationView = document.createElement('div');
+        conversationView.className = 'conversation-view';
+        conversationView.dataset.conversationId = id;
+        conversationView.style.display = 'none';
+        conversationView.innerHTML = `
+            <div class="chat-header">
+                <h3>${escapeHtml(title)}</h3>
+                <button class="header-button clear-chat" title="Clear chat">🗑️</button>
+            </div>
+            <div class="messages"></div>
+            <div class="typing-indicator" style="display: none;">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+            <div class="input-container">
+                <textarea class="message-input" placeholder="Ask me anything about your code..." rows="3"></textarea>
+                <button class="send-button">Send</button>
+            </div>
+        `;
+
+        // Set up event listeners for this conversation
+        const messageInput = conversationView.querySelector('.message-input');
+        const sendButton = conversationView.querySelector('.send-button');
+        const clearButton = conversationView.querySelector('.clear-chat');
+
+        sendButton.addEventListener('click', () => sendMessage(id, messageInput));
+
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(id, messageInput);
+            }
+        });
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', () => {
+            messageInput.style.height = 'auto';
+            messageInput.style.height = messageInput.scrollHeight + 'px';
+        });
+
+        clearButton.addEventListener('click', () => {
+            const messagesContainer = conversationView.querySelector('.messages');
+            messagesContainer.innerHTML = '';
+            vscode.postMessage({ type: 'clearChat', conversationId: id });
+        });
+
+        conversationsContainer.appendChild(conversationView);
+
+        // Store in map
+        conversations.set(id, {
+            title,
+            messages: [],
+            tabElement: tab,
+            viewElement: conversationView
+        });
+    }
+
+    function sendMessage(conversationId, inputElement) {
+        const message = inputElement.value.trim();
+        if (!message) return;
+
+        // Clear input
+        inputElement.value = '';
+        inputElement.style.height = 'auto';
+
+        // Send to extension
+        vscode.postMessage({
+            type: 'sendMessage',
+            conversationId,
+            message
+        });
+    }
+
+    function handleConversationMessage(message) {
+        displayMessage(message.conversationId, message.message);
+    }
+
+    function displayMessage(conversationId, message) {
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return;
+
+        const messagesContainer = conversation.viewElement.querySelector('.messages');
+        const { role, content, reasoning, toolCalls, model, isComplete, tokenUsage } = message;
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${role}`;
+
+        if (role === 'assistant') {
+            // Include model info if available
+            const modelInfo = model ? `<div class="model-info">Model: ${model}</div>` : '';
+            const completionInfo = isComplete !== undefined ?
+                `<div class="completion-info">${isComplete ? '✅ Complete' : '⏳ Pending tool execution'}</div>` : '';
+
+            // Build token usage info if available
+            let tokenInfo = '';
+            if (tokenUsage) {
+                tokenInfo = `<div class="token-info">📊 Tokens: ${tokenUsage.input_tokens} in, ${tokenUsage.output_tokens} out (${tokenUsage.total_tokens} total)</div>`;
+            }
+
+            // Build the reasoning section if present
+            let reasoningSection = '';
+            if (reasoning) {
+                const reasoningId = 'reasoning-' + Date.now();
+                const isLong = reasoning.length > 200;
+                const truncated = isLong ? reasoning.substring(0, 200) + '...' : reasoning;
+
+                reasoningSection = `
+                    <div class="embedded-reasoning">
+                        <div class="reasoning-header reasoning-header-clickable" data-reasoning-id="${reasoningId}">
+                            💭 Reasoning 
+                            <span class="reasoning-toggle" id="${reasoningId}-toggle">
+                                ${isLong ? '▶' : ''}
+                            </span>
+                        </div>
+                        <div class="reasoning-content ${isLong ? 'collapsed' : ''}" id="${reasoningId}">
+                            <div class="reasoning-truncated">${renderContent(truncated)}</div>
+                            <div class="reasoning-full" style="display: none;">${renderContent(reasoning)}</div>
+                        </div>
+                    </div>
+                `;
+
+                // Store expansion state
+                window[`toggleReasoning_${reasoningId}`] = isLong;
+            }
+
+            // Build tool calls section if present
+            let toolCallsSection = '';
+            if (toolCalls && toolCalls.length > 0) {
+                const toolCallsHtml = toolCalls.map(toolCall => `
+                    <div class="tool-call-item">
+                        <div class="tool-header">🔧 ${toolCall.name}</div>
+                        ${toolCall.arguments ? `<div class="tool-details"><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre></div>` : ''}
+                    </div>
+                `).join('');
+
+                toolCallsSection = `
+                    <div class="embedded-tool-calls">
+                        ${toolCallsHtml}
+                    </div>
+                `;
+            }
+
+            messageDiv.innerHTML = `
+                ${modelInfo}
+                ${tokenInfo}
+                ${reasoningSection}
+                <div class="message-content">${renderContent(content)}</div>
+                ${toolCallsSection}
+                ${completionInfo}
+            `;
+
+            // Add click event listener for reasoning after adding to DOM
+            if (reasoning) {
+                setTimeout(() => {
+                    const header = messageDiv.querySelector('.reasoning-header-clickable');
+                    if (header) {
+                        header.addEventListener('click', function () {
+                            const id = this.getAttribute('data-reasoning-id');
+                            toggleReasoning(id);
+                        });
+                    }
+                }, 0);
+            }
+        } else {
+            messageDiv.innerHTML = renderContent(content);
+        }
+
+        // Add code action buttons
+        addCodeActions(messageDiv);
+
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        // Store message
+        conversation.messages.push(message);
+    }
+
+    function toggleReasoning(reasoningId) {
+        const content = document.getElementById(reasoningId);
+        const toggle = document.getElementById(reasoningId + '-toggle');
+        const truncated = content.querySelector('.reasoning-truncated');
+        const full = content.querySelector('.reasoning-full');
+
+        // Only toggle if there's a full version
+        if (window[`toggleReasoning_${reasoningId}`]) {
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                content.classList.add('expanded');
+                truncated.style.display = 'none';
+                full.style.display = 'block';
+                toggle.textContent = '▼';
+            } else {
+                content.classList.remove('expanded');
+                content.classList.add('collapsed');
+                truncated.style.display = 'block';
+                full.style.display = 'none';
+                toggle.textContent = '▶';
+            }
+        }
+    }
+
+    function handleActiveConversationChanged(message) {
+        setActiveConversation(message.id);
+    }
+
+    function setActiveConversation(id) {
+        activeConversationId = id;
+
+        // Update tab styling
+        document.querySelectorAll('.tab').forEach(tab => {
+            if (tab.dataset.conversationId === id) {
+                tab.classList.add('active');
+            } else {
+                tab.classList.remove('active');
+            }
+        });
+
+        // Show/hide conversation views
+        document.querySelectorAll('.conversation-view').forEach(view => {
+            if (view.dataset.conversationId === id) {
+                view.style.display = 'flex';
+                // Focus input
+                const input = view.querySelector('.message-input');
+                if (input) input.focus();
+            } else {
+                view.style.display = 'none';
+            }
+        });
+    }
+
+    function handleConversationClosed(message) {
+        const conversation = conversations.get(message.id);
+        if (conversation) {
+            conversation.tabElement.remove();
+            conversation.viewElement.remove();
+            conversations.delete(message.id);
+        }
+
+        if (conversations.size === 0) {
+            showWelcomeScreen();
+        }
+    }
+
+    function handleConversationTitleChanged(message) {
+        const conversation = conversations.get(message.id);
+        if (conversation) {
+            conversation.title = message.title;
+            conversation.tabElement.querySelector('.tab-title').textContent = message.title;
+            conversation.viewElement.querySelector('.chat-header h3').textContent = message.title;
+        }
+    }
+
+    function handleConversationCleared(message) {
+        const conversation = conversations.get(message.conversationId);
+        if (conversation) {
+            conversation.messages = [];
+        }
+    }
+
+    function handleShowTyping(message) {
+        const conversation = conversations.get(message.conversationId);
+        if (conversation) {
+            const typingIndicator = conversation.viewElement.querySelector('.typing-indicator');
+            typingIndicator.style.display = message.show ? 'flex' : 'none';
+            if (message.show) {
+                const messagesContainer = conversation.viewElement.querySelector('.messages');
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+    }
+
+    function handleConversationDisconnected(message) {
+        const conversation = conversations.get(message.id);
+        if (conversation) {
+            displayMessage(message.id, {
+                role: 'error',
+                content: 'Connection to backend lost. Please close this tab and start a new chat.'
+            });
+        }
+    }
+
+    function showWelcomeScreen() {
+        welcomeScreen.style.display = 'flex';
+        tabBar.style.display = 'none';
+        conversationsContainer.style.display = 'none';
+    }
+
+    function showConversations() {
+        welcomeScreen.style.display = 'none';
+        tabBar.style.display = 'flex';
+        conversationsContainer.style.display = 'flex';
+    }
+
+    function renderContent(content) {
+        // Escape HTML first
+        let rendered = escapeHtml(content);
+
+        // Render code blocks with syntax highlighting hint
+        rendered = rendered.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+            return `<div class="code-block-container">
+                <pre><code class="language-${lang || 'plaintext'}">${escapeHtml(code.trim())}</code></pre>
+            </div>`;
+        });
+
+        // Render inline code
+        rendered = rendered.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+        // Render markdown headers (h1-h6)
+        rendered = rendered.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+        rendered = rendered.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+        rendered = rendered.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+        rendered = rendered.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        rendered = rendered.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        rendered = rendered.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+        // Render links
+        rendered = rendered.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+        // Render bold
+        rendered = rendered.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+        // Render italic
+        rendered = rendered.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+        // Preserve line breaks
+        rendered = rendered.replace(/\n/g, '<br>');
+
+        // Clean up excessive spacing
+        rendered = rendered.replace(/(<h[1-6]>.*?)<br>(.*?<\/h[1-6]>)/g, '$1 $2');
+        rendered = rendered.replace(/(<\/h[1-6]>)<br>/g, '$1');
+        rendered = rendered.replace(/(<br>){2,}/g, '<br>');
+        rendered = rendered.replace(/<br>(<h[1-6]>)/g, '$1');
+
+        return rendered;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function addCodeActions(messageDiv) {
+        const codeBlocks = messageDiv.querySelectorAll('.code-block-container');
+
+        codeBlocks.forEach(block => {
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'code-actions';
+
+            // Copy button
+            const copyButton = document.createElement('button');
+            copyButton.className = 'code-action-button';
+            copyButton.textContent = 'Copy';
+            copyButton.onclick = () => {
+                const code = block.querySelector('code').textContent;
+                vscode.postMessage({
+                    type: 'copyCode',
+                    code: code
+                });
+            };
+
+            // Insert button
+            const insertButton = document.createElement('button');
+            insertButton.className = 'code-action-button';
+            insertButton.textContent = 'Insert';
+            insertButton.onclick = () => {
+                const code = block.querySelector('code').textContent;
+                vscode.postMessage({
+                    type: 'insertCode',
+                    code: code
+                });
+            };
+
+            actionsDiv.appendChild(copyButton);
+            actionsDiv.appendChild(insertButton);
+            block.appendChild(actionsDiv);
+        });
+    }
+})();

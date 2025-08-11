@@ -81,7 +81,7 @@ impl ToolExecutor for ReplaceInFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Replace sections of content in an existing file using SEARCH/REPLACE blocks"
+        "Replace sections of content in an existing file"
     }
 
     fn input_schema(&self) -> Value {
@@ -94,7 +94,7 @@ impl ToolExecutor for ReplaceInFileTool {
                 },
                 "diff": {
                     "type": "string",
-                    "description": "SEARCH/REPLACE blocks defining the changes"
+                    "description": "One or more SEARCH/REPLACE blocks following this exact format:\n------- SEARCH\n[exact content to find]\n=======\n[new content to replace with]\n+++++++ REPLACE\n\nCritical: Use exactly 7 dashes before SEARCH, 7 equals for separator, 7 pluses before REPLACE. Multiple blocks can be included in one diff. Example:\n------- SEARCH\nold line 1\nold line 2\n=======\nnew line 1\nnew line 2\n+++++++ REPLACE"
                 }
             },
             "required": ["file_path", "diff"]

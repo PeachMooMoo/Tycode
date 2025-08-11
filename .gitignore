@@ -9,3 +9,6 @@ Cargo.lock
 
 # Tycode trace and index files
 .tycode/
+
+# OSX indexing
+.DS_Store
