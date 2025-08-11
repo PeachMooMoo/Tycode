@@ -1,4 +1,63 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct MessageContext {
+    pub working_directory: PathBuf,
+    pub relevant_files: Vec<PathBuf>,
+    pub tracked_file_contents: HashMap<PathBuf, String>,
+}
+
+impl MessageContext {
+    pub fn new(working_directory: PathBuf) -> Self {
+        Self {
+            working_directory,
+            relevant_files: Vec::new(),
+            tracked_file_contents: HashMap::new(),
+        }
+    }
+
+    pub fn add_tracked_file(&mut self, path: PathBuf, content: String) {
+        self.tracked_file_contents.insert(path, content);
+    }
+
+    pub fn set_relevant_files(&mut self, files: Vec<PathBuf>) {
+        self.relevant_files = files;
+    }
+
+    pub fn get_context_size(&self) -> usize {
+        self.tracked_file_contents.values().map(|s| s.len()).sum()
+    }
+
+    pub fn to_formatted_string(&self) -> String {
+        let mut result = String::new();
+
+        result.push_str(&format!(
+            "Working Directory: {}\n\n",
+            self.working_directory.display()
+        ));
+
+        if !self.relevant_files.is_empty() {
+            result.push_str("Project Files:\n");
+            for file in &self.relevant_files {
+                result.push_str(&format!("  - {}\n", file.display()));
+            }
+            result.push_str("\n");
+        }
+
+        if !self.tracked_file_contents.is_empty() {
+            result.push_str("Tracked Files:\n");
+            for (path, content) in &self.tracked_file_contents {
+                result.push_str(&format!("\n=== {} ===\n", path.display()));
+                result.push_str(content);
+                result.push_str("\n");
+            }
+        }
+
+        result
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ConversationRequest {

@@ -1,12 +1,13 @@
 use crate::agents::ToolType;
 use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
-use crate::chat::state::FileModificationApi;
+use crate::chat::state::{FileModificationApi, SharedChatState};
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::list_files::ListFilesTool;
 use crate::tools::file::read_file::ReadFileTool;
 use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
+use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::r#trait::ToolExecutor;
 use std::collections::HashMap;
@@ -23,12 +24,20 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new(workspace_root: PathBuf, file_modification_api: FileModificationApi) -> Self {
+        Self::with_chat_state(workspace_root, file_modification_api, None)
+    }
+
+    pub fn with_chat_state(
+        workspace_root: PathBuf,
+        file_modification_api: FileModificationApi,
+        chat_state: Option<Arc<SharedChatState>>,
+    ) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
             file_modification_api: file_modification_api.clone(),
         };
 
-        registry.register_file_tools(workspace_root.clone(), file_modification_api);
+        registry.register_file_tools(workspace_root.clone(), file_modification_api, chat_state);
         registry.register_command_tools(workspace_root);
         registry
     }
@@ -37,12 +46,21 @@ impl ToolRegistry {
         &mut self,
         workspace_root: PathBuf,
         file_modification_api: FileModificationApi,
+        chat_state: Option<Arc<SharedChatState>>,
     ) {
         self.register_tool(Arc::new(ReadFileTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(WriteFileTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(ListFilesTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(SearchFilesTool::new(workspace_root.clone())));
         self.register_tool(Arc::new(DeleteFileTool::new(workspace_root.clone())));
+
+        // Register set_tracked_files tool if chat state is available
+        if let Some(chat_state) = chat_state {
+            self.register_tool(Arc::new(SetTrackedFilesTool::new(
+                workspace_root.clone(),
+                chat_state,
+            )));
+        }
 
         match file_modification_api {
             FileModificationApi::Patch => {
@@ -79,6 +97,7 @@ impl ToolRegistry {
             },
             ToolType::ExecuteCommand => Some("execute_command"),
             ToolType::DeleteFile => Some("delete_file"),
+            ToolType::SetTrackedFiles => Some("set_tracked_files"),
         }
     }
 

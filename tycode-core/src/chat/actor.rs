@@ -2,7 +2,7 @@ use crate::agents::{ActiveAgent, Agent, SoftwareEngineerAgent, ToolType};
 use crate::ai::{
     bedrock::BedrockProvider,
     provider::AiProvider,
-    types::{Content, ConversationRequest, Message, MessageRole},
+    types::{Content, ConversationRequest, Message, MessageContext, MessageRole},
 };
 use crate::ai::{ContentBlock, ModelSettings};
 use crate::chat::{
@@ -11,13 +11,16 @@ use crate::chat::{
     state::SharedChatState,
 };
 use crate::settings::SettingsManager;
+use crate::tools::context_utils::list_relevant_files;
+use crate::tools::file_access::FileAccessManager;
 use crate::tools::registry::ToolRegistry;
 use anyhow::Result;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub enum ChatActorMessage {
     UserInput(String),
@@ -157,6 +160,33 @@ impl ChatActor {
         }
     }
 
+    async fn build_message_context(&self) -> MessageContext {
+        let working_dir = PathBuf::from(".");
+        let mut context = MessageContext::new(working_dir.clone());
+
+        // Get relevant files from the directory
+        let relevant_files = list_relevant_files(&working_dir);
+        context.set_relevant_files(relevant_files.files);
+
+        // Load content of tracked files
+        let tracked_files = self.state.get_tracked_files();
+        let file_manager = FileAccessManager::new(working_dir);
+
+        for file_path in tracked_files {
+            let path_str = file_path.to_string_lossy();
+            match file_manager.read_file(&path_str).await {
+                Ok(content) => {
+                    context.add_tracked_file(file_path, content);
+                }
+                Err(e) => {
+                    warn!(?e, "Failed to read tracked file: {:?}", file_path);
+                }
+            }
+        }
+
+        context
+    }
+
     async fn send_ai_request(&mut self) -> Result<()> {
         self.state.set_typing(true);
 
@@ -166,13 +196,37 @@ impl ChatActor {
                 current.agent.available_tools().into_iter().collect();
 
             let file_modification_api = self.state.get_file_modification_api();
-            let tool_registry = ToolRegistry::new(".".into(), file_modification_api);
+            let tool_registry = ToolRegistry::with_chat_state(
+                ".".into(),
+                file_modification_api,
+                Some(Arc::new(self.state.clone())),
+            );
 
             // Get tool definitions for the agent's allowed tool types
             let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
             let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
-            let conversation = self.current_agent().conversation.clone();
+            // Build message context with tracked files
+            let message_context = self.build_message_context().await;
+
+            // Build messages for the request WITHOUT modifying the stored conversation
+            let mut messages_for_request = Vec::new();
+
+            // Only add context if we have tracked files or it's the first message
+            let tracked_files = self.state.get_tracked_files();
+            if !tracked_files.is_empty() || self.current_agent().conversation.is_empty() {
+                let context_string = message_context.to_formatted_string();
+
+                // Add context as the first message (not stored in conversation history)
+                let context_message = Message {
+                    role: MessageRole::User,
+                    content: Content::text_only(format!("Current Context:\n{}", context_string)),
+                };
+                messages_for_request.push(context_message);
+            }
+
+            // Add the actual conversation history
+            messages_for_request.extend(self.current_agent().conversation.clone());
 
             // Determine which model settings to use and track the source
             let (model_settings, model_source) = self.determine_model_settings_and_source(current);
@@ -180,7 +234,7 @@ impl ChatActor {
             let system_prompt = current.agent.system_prompt().to_string();
 
             let request = ConversationRequest {
-                messages: conversation,
+                messages: messages_for_request,
                 model: model_settings.clone(),
                 system_prompt,
                 stop_sequences: vec![],

@@ -15,7 +15,8 @@ impl Agent for SoftwareEngineerAgent {
    - Carefully analyze the user's request
    - Ask clarifying questions if requirements are unclear
    - Identify the scope and constraints
-   - Understand the existing codebase context
+   - Use set_tracked_files to track relevant files for context awareness
+   - Files you track will automatically be included in all future messages
 
 2. WRITE A PLAN AND GET APPROVAL
    - Create a detailed implementation plan
@@ -29,12 +30,13 @@ impl Agent for SoftwareEngineerAgent {
    - Write clean, maintainable code following the style guide
    - Create new files or modify existing ones as needed
    - Ensure code follows the project's conventions and patterns
+   - Update tracked files as needed (set_tracked_files with empty array to clear)
 
 4. REVIEW THE CHANGES
-   - Review all code changes (use tools to re-read modified files)
-     - Ensure all changes follow the style guide 
-     - Check for potential bugs or issues
-     - Verify the implementation matches the requirements
+   - Review all modified files by ensuring they're tracked
+   - Verify all changes follow the style guide
+   - Check for potential bugs or issues
+   - Verify the implementation matches the requirements
    - Test the changes if possible
    - Provide a summary of what was implemented
 
@@ -65,13 +67,14 @@ Rust Specific:
 
     fn available_tools(&self) -> Vec<ToolType> {
         vec![
-            ToolType::ReadFile,
+            ToolType::SetTrackedFiles,
             ToolType::WriteFile,
-            ToolType::ListFiles,
-            // ToolType::SearchFiles,
             ToolType::ModifyFile,
             ToolType::DeleteFile,
             ToolType::ExecuteCommand,
+            // ToolType::ReadFile,
+            // ToolType::ListFiles,
+            // ToolType::SearchFiles,
         ]
     }
 }

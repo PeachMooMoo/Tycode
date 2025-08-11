@@ -1,30 +1,29 @@
 # TyCode
 
-TyCode is an intelligent operations toolkit that combines AWS service management with AI capabilities to enhance productivity in cloud operations tasks. Built in Rust, it provides AI-powered interactions through Amazon Bedrock with a focus on Aurora DSQL database operations, CloudWatch Logs analysis, and AWS infrastructure management.
+TyCode is an AI-powered development assistant that integrates with Amazon Bedrock's Claude models to provide intelligent code generation, refactoring, and development guidance. Built in Rust, it offers both a native CLI and VSCode extension for seamless AI-assisted programming with full project context awareness.
 
 ## 🎯 What TyCode Does
 
-**TyCode** is an AI-powered operational tool that serves as your intelligent assistant for AWS operations:
+**TyCode** is an AI pair programmer that helps you write better code faster:
 
-- **🤖 AI-Enhanced Operations**: Leverage Amazon Bedrock (Claude models) for intelligent analysis, troubleshooting, and operational guidance
-- **🗄️ Database Management**: Specialized support for Aurora DSQL database operations with AI assistance
-- **📊 Log Analysis**: Analyze CloudWatch logs using AI-powered insights and pattern recognition
-- **☁️ Infrastructure Management**: Configure and manage AWS resources with intelligent recommendations
-- **💬 Interactive Terminal**: Professional TUI for conversing with AI models and executing operations
-- **🔧 Automation Ready**: Build AI-enhanced operational workflows and scripts
+- **🤖 Intelligent Code Generation**: Generate functions, modules, or entire features based on natural language descriptions
+- **📝 Code Refactoring**: Improve existing code structure, performance, and readability with AI-powered suggestions
+- **📁 File Management**: Read, write, modify, and track files with context-aware operations
+- **🔧 Command Execution**: Run cargo commands and development tools directly through the assistant
+- **💬 Interactive Development**: Chat with AI about your code, get explanations, and debug issues together
+- **🎯 Structured Workflow**: Follows a disciplined approach: understand → plan → implement → review
 
 ## 🏗️ Architecture
 
 ### Core Modules
 
-- **`ai/`** - AI provider abstractions and Amazon Bedrock integration
-- **`aws/`** - AWS service clients and utilities
-- **`db/`** - Database operations with Aurora DSQL focus
-- **`config/`** - Configuration management and AWS credential handling
-- **`terminal/`** - Interactive terminal UI applications
-- **`tools/`** - Utility functions and operational helpers
+- **`agents/`** - Specialized AI agents (Software Engineer, Design) with different capabilities and tool access
+- **`ai/`** - AI provider abstractions and Amazon Bedrock integration with Claude models
+- **`chat/`** - Event-driven chat actor system for managing conversations and state
+- **`settings/`** - Configuration management and persistent settings
+- **`tools/`** - Development tools for file operations, command execution, and context management
 
-### AI Integration (`src/ai/`)
+### AI Integration (`tycode-core/src/ai/`)
 
 The AI module provides a clean abstraction over Amazon Bedrock services with unified content handling:
 
@@ -50,10 +49,11 @@ pub trait AiProvider: Clone + Send + Sync {
 - AI reasoning modes with configurable token budgets
 - Tool usage and function calling capabilities
 - System prompts and conversation memory
+- Structured development workflow enforcement
 
-## 🖥️ TyCode Chat - Interactive AI Terminal
+## 🖥️ TyCode CLI - Interactive AI Terminal
 
-The flagship application is **TyCode Chat**, a sophisticated terminal user interface for AI-powered operations.
+The flagship application is **TyCode CLI**, a sophisticated terminal interface for AI-powered development.
 
 ### Features
 
@@ -64,18 +64,22 @@ The flagship application is **TyCode Chat**, a sophisticated terminal user inter
 - 🧠 **Reasoning Support**: Enable/disable reasoning with configurable token budgets
 - 🔧 **Command System**: Slash commands for application control
 - 📊 **Status Display**: Real-time model, reasoning status, and shortcuts
+- 📁 **File Tracking**: Track specific files for context awareness
 
 ### Usage
 
 ```bash
 # Basic usage
-cargo run --bin tycode-chat
+cargo run --bin tycode
 
 # With custom configuration
-cargo run --bin tycode-chat -- --model claude-sonnet-4 --temperature 0.7 --reasoning-budget 2000
+cargo run --bin tycode -- --model claude-sonnet-4 --temperature 0.7 --reasoning-budget 2000
 
 # Different AWS profile/region
-cargo run --bin tycode-chat -- --profile myprofile --region us-east-1
+cargo run --bin tycode -- --profile myprofile --region us-east-1
+
+# Subprocess mode for VSCode extension
+cargo run --bin tycode -- --subprocess
 ```
 
 ### Interactive Commands
@@ -116,10 +120,13 @@ cd tycode
 cargo build
 
 # Run the CLI (recommended)
-cargo run --bin tycode-cli
+cargo run --bin tycode
 
-# Run the TUI chat application
-cargo run --bin tycode-chat
+# Install the VSCode extension
+cd tycode-vscode
+npm install
+npm run package
+# Install the generated .vsix file in VSCode
 
 # Run tests
 cargo test
@@ -130,7 +137,7 @@ cargo doc --open
 
 ### Configuration
 
-TyCode now supports persistent configuration through `~/.tycode/settings.toml`:
+TyCode supports persistent configuration through `~/.tycode/settings.toml`:
 
 ```toml
 [global]
@@ -162,63 +169,67 @@ The application uses standard AWS credential resolution:
 
 ### Core AWS Integration
 - `aws-sdk-bedrockruntime` - Amazon Bedrock AI services
-- `aws-sdk-cloudwatchlogs` - CloudWatch logs analysis
-- `aws-sdk-dsql` - Aurora DSQL database operations
-- `aws-sdk-sts` - AWS Security Token Service
+- `aws-config` - AWS configuration and authentication
+- `aws-smithy-types` - AWS SDK type definitions
 
-### Terminal UI & User Experience
-- `ratatui` - Modern terminal UI framework
-- `crossterm` - Cross-platform terminal handling
-- `tui-input` - Input widgets and controls
+### Terminal UI & User Experience (CLI only)
+- `colored` - Terminal output coloring
+- `rustyline` - Readline implementation for input handling
+- `indicatif` - Progress indicators
 - `clap` - Command-line argument parsing
 
 ### Core Functionality
 - `tokio` - Async runtime
-- `sqlx` - Database connectivity
 - `serde` + `serde_json` - Serialization
 - `anyhow` - Error handling
+- `similar` - Diff generation for file modifications
+- `regex` - Pattern matching for file operations
+- `walkdir` - Recursive file traversal
 
 ## 🎯 Use Cases
 
-### Database Operations
-- **Query Assistance**: Get AI help with complex SQL queries
-- **Schema Analysis**: Understand database structure and relationships
-- **Performance Troubleshooting**: Analyze query performance with AI insights
-- **Data Migration**: Plan and execute data migrations with AI guidance
+### Code Development
+- **Feature Implementation**: Describe what you want to build and let TyCode generate the code
+- **Code Review**: Get AI-powered feedback on code quality, bugs, and improvements
+- **Refactoring**: Transform legacy code into modern, maintainable structures
+- **Test Generation**: Automatically create comprehensive test suites
+- **Documentation**: Generate or improve code documentation and comments
 
-### Log Analysis
-- **Pattern Recognition**: Identify patterns and anomalies in CloudWatch logs
-- **Error Investigation**: Get AI assistance in troubleshooting application errors
-- **Performance Analysis**: Analyze application performance from log data
-- **Alert Investigation**: Investigate and understand alert triggers
+### Debugging & Problem Solving
+- **Bug Investigation**: Get help understanding and fixing complex bugs
+- **Performance Analysis**: Identify and resolve performance bottlenecks
+- **Error Resolution**: Understand error messages and get fix suggestions
+- **Code Explanation**: Have AI explain complex code sections in plain language
 
-### Infrastructure Management
-- **Configuration Review**: Get AI recommendations for AWS configurations
-- **Cost Optimization**: Analyze and optimize AWS resource usage
-- **Security Analysis**: Review security configurations and policies
-- **Capacity Planning**: Plan resource scaling with AI insights
+### Learning & Best Practices
+- **Pattern Guidance**: Learn design patterns and architectural best practices
+- **Language Features**: Understand language-specific features and idioms
+- **Library Usage**: Get examples and explanations for using external libraries
+- **Code Style**: Ensure consistent code style and conventions
 
-### Interactive Troubleshooting
-- **Real-time Support**: Get immediate AI assistance during operations
-- **Documentation Helper**: Ask questions about AWS services and best practices
-- **Workflow Guidance**: Step-by-step guidance for complex operational tasks
-- **Learning Assistant**: Learn AWS services and operations interactively
+### Project Management
+- **File Organization**: Restructure and organize project files effectively
+- **Dependency Management**: Analyze and optimize project dependencies
+- **Migration Assistance**: Help with framework or library migrations
+- **Codebase Analysis**: Understand large codebases quickly
 
 ## 🛠️ Development & Extension
 
 ### Architecture Benefits
 
-- **Modular Design**: Clean separation of concerns across modules
+- **Modular Design**: Clean separation between core, CLI, and VSCode extension
+- **Agent System**: Specialized agents for different types of tasks
+- **Tool Abstraction**: Extensible tool system for new capabilities
 - **Provider Pattern**: Easy extension to other AI services beyond Bedrock
-- **Async-First**: Built for high-performance concurrent operations
-- **Type Safety**: Rust's type system prevents common operational errors
+- **Event-Driven**: Async event-based chat system for scalability
+- **Type Safety**: Rust's type system prevents common errors
 
 ### Extension Points
 
-- **New AI Providers**: Implement the `AiProvider` trait for other services
-- **Custom Terminal Apps**: Extend the terminal module for specialized UIs
-- **Database Integrations**: Add support for other database systems
-- **AWS Service Extensions**: Integrate additional AWS services as needed
+- **New Agents**: Create specialized agents for specific domains
+- **Custom Tools**: Add new tools for specific development workflows
+- **AI Providers**: Implement the `AiProvider` trait for other services
+- **File Strategies**: Add new file modification strategies beyond patch/find-replace
 
 ### Code Quality
 
@@ -226,24 +237,29 @@ The application uses standard AWS credential resolution:
 - Uses `anyhow` for ergonomic error management
 - Structured logging with `tracing`
 - Modular architecture for maintainability and testing
+- Strict style guide enforcement (YAGNI, shallow nesting, immediate error surfacing)
 
 ## 🎪 Why TyCode?
 
-TyCode bridges the gap between traditional operational tools and modern AI capabilities. Instead of switching between multiple tools, documentation, and support channels, operators can:
+TyCode transforms how developers interact with AI assistance by providing a context-aware, structured approach to AI pair programming:
 
-1. **Ask Questions**: Get instant answers about configurations, errors, and best practices
-2. **Analyze Data**: Use AI to understand patterns in logs, metrics, and database queries  
-3. **Get Guidance**: Receive step-by-step instructions for complex operational tasks
-4. **Learn Interactively**: Understand AWS services and operations through conversation
-5. **Automate Intelligently**: Build workflows that adapt and improve with AI insights
+1. **Context Awareness**: Tracks and understands your project files, maintaining awareness of your codebase
+2. **Structured Workflow**: Follows a disciplined development process ensuring quality and completeness
+3. **Multiple Interfaces**: Use it in your terminal or directly in VSCode - your choice
+4. **Tool Integration**: Executes commands and manipulates files directly, not just suggesting changes
+5. **Configurable AI**: Choose between different Claude models based on task complexity
+6. **Learning Partner**: Not just generating code, but explaining and teaching as it goes
 
 This makes TyCode particularly valuable for:
-- **DevOps Engineers** managing complex AWS infrastructures
-- **Database Administrators** working with Aurora DSQL and other databases
-- **Site Reliability Engineers** troubleshooting production issues
-- **Cloud Architects** designing and optimizing AWS solutions
-- **Support Teams** providing faster, more accurate assistance
+- **Solo Developers** wanting an intelligent pair programmer
+- **Teams** looking to accelerate development and maintain consistency
+- **Learners** seeking to understand code and best practices
+- **Senior Engineers** automating routine tasks and focusing on architecture
+- **Code Reviewers** getting AI-assisted analysis and suggestions
+- **Project Maintainers** managing refactoring and technical debt
+
+The key differentiator is that TyCode doesn't just suggest code - it understands your project context, plans its approach, implements changes directly, and reviews its own work, all while following software engineering best practices.
 
 ---
 
-*TyCode: Where AWS operations meet artificial intelligence.*
+*TyCode: Your AI pair programmer that actually writes code.*

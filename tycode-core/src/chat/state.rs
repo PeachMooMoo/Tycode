@@ -1,6 +1,7 @@
 use crate::chat::events::{ChatEvent, ChatMessage};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -9,6 +10,7 @@ pub struct ChatState {
     pub input_history: Vec<String>,
     pub is_typing: bool,
     pub config: ChatConfig,
+    pub tracked_files: HashSet<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,7 +47,33 @@ impl ChatState {
             input_history: Vec::new(),
             is_typing: false,
             config: ChatConfig::default(),
+            tracked_files: HashSet::new(),
         }
+    }
+
+    pub fn track_file(&mut self, path: PathBuf) -> bool {
+        self.tracked_files.insert(path)
+    }
+
+    pub fn untrack_file(&mut self, path: &PathBuf) -> bool {
+        self.tracked_files.remove(path)
+    }
+
+    pub fn get_tracked_files(&self) -> Vec<PathBuf> {
+        self.tracked_files.iter().cloned().collect()
+    }
+
+    pub fn is_file_tracked(&self, path: &PathBuf) -> bool {
+        self.tracked_files.contains(path)
+    }
+
+    pub fn clear_tracked_files(&mut self) {
+        self.tracked_files.clear()
+    }
+
+    pub fn set_tracked_files(&mut self, files: Vec<PathBuf>) {
+        self.tracked_files.clear();
+        self.tracked_files.extend(files);
     }
 }
 
@@ -137,5 +165,35 @@ impl SharedChatState {
     pub fn get_trace(&self) -> bool {
         let state = self.inner.lock().unwrap();
         state.config.trace
+    }
+
+    pub fn track_file(&self, path: PathBuf) -> bool {
+        let mut state = self.inner.lock().unwrap();
+        state.track_file(path)
+    }
+
+    pub fn untrack_file(&self, path: &PathBuf) -> bool {
+        let mut state = self.inner.lock().unwrap();
+        state.untrack_file(path)
+    }
+
+    pub fn get_tracked_files(&self) -> Vec<PathBuf> {
+        let state = self.inner.lock().unwrap();
+        state.get_tracked_files()
+    }
+
+    pub fn is_file_tracked(&self, path: &PathBuf) -> bool {
+        let state = self.inner.lock().unwrap();
+        state.is_file_tracked(path)
+    }
+
+    pub fn clear_tracked_files(&self) {
+        let mut state = self.inner.lock().unwrap();
+        state.clear_tracked_files()
+    }
+
+    pub fn set_tracked_files(&self, files: Vec<PathBuf>) {
+        let mut state = self.inner.lock().unwrap();
+        state.set_tracked_files(files)
     }
 }

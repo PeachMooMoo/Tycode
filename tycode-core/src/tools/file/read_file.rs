@@ -36,7 +36,7 @@ impl ToolExecutor for ReadFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read the contents of a file"
+        "[DEPRECATED - Use 'track_file' instead] Read the contents of a file. Note: For better context management, use 'track_file' to include file contents in all future messages, and 'untrack_file' to remove them. This provides continuous awareness of file changes."
     }
 
     fn input_schema(&self) -> Value {

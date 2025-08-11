@@ -7,6 +7,7 @@ pub enum ToolType {
     ModifyFile,
     ExecuteCommand,
     DeleteFile,
+    SetTrackedFiles,
 }
 
 impl ToolType {
@@ -19,6 +20,7 @@ impl ToolType {
             Self::ModifyFile => "modify_file",
             Self::ExecuteCommand => "execute_command",
             Self::DeleteFile => "delete_file",
+            Self::SetTrackedFiles => "set_tracked_files",
         }
     }
 
@@ -31,6 +33,7 @@ impl ToolType {
             "modify_file" | "apply_patch" | "replace_in_file" => Some(Self::ModifyFile),
             "execute_command" => Some(Self::ExecuteCommand),
             "delete_file" => Some(Self::DeleteFile),
+            "set_tracked_files" => Some(Self::SetTrackedFiles),
             _ => None,
         }
     }
