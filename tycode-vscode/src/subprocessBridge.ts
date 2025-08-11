@@ -145,7 +145,20 @@ export class SubprocessBridge extends EventEmitter {
         const arch = process.arch;
         const binaryName = platform === 'win32' ? 'tycode.exe' : 'tycode';
 
-        // Map platform/arch to directory names
+        // Check development paths first (prioritize fresh builds during development)
+        const devPaths = [
+            path.join(this.context.extensionPath, '..', 'target', 'release', binaryName),
+            path.join(this.context.extensionPath, '..', 'target', 'debug', binaryName)
+        ];
+
+        for (const devPath of devPaths) {
+            if (fs.existsSync(devPath)) {
+                console.log('Using development binary:', devPath);
+                return devPath;
+            }
+        }
+
+        // Fall back to bundled binary (production)
         let platformDir: string;
         if (platform === 'darwin') {
             platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
@@ -157,27 +170,13 @@ export class SubprocessBridge extends EventEmitter {
             throw new Error(`Unsupported platform: ${platform}`);
         }
 
-        // Try bundled binary first (production)
         let binaryPath = path.join(this.context.extensionPath, 'binaries', platformDir, binaryName);
         if (fs.existsSync(binaryPath)) {
             console.log('Using bundled binary:', binaryPath);
             return binaryPath;
         }
 
-        // Fall back to development paths
-        const devPaths = [
-            path.join(this.context.extensionPath, '..', 'target', 'debug', binaryName),
-            path.join(this.context.extensionPath, '..', 'target', 'release', binaryName)
-        ];
-
-        for (const devPath of devPaths) {
-            if (fs.existsSync(devPath)) {
-                console.log('Using development binary:', devPath);
-                return devPath;
-            }
-        }
-
-        throw new Error(`tycode binary not found. Searched: ${binaryPath}, ${devPaths.join(', ')}`);
+        throw new Error(`tycode binary not found. Searched development paths: ${devPaths.join(', ')} and bundled path: ${binaryPath}`);
     }
 
     dispose(): void {

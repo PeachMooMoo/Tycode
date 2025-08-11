@@ -43,6 +43,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                         role: 'system',
                         content: data.content
                     });
+                    this._view.webview.postMessage({ type: 'hideTyping' });
                 }
                 // Note: typing events are no longer sent, tool_calls are in Response
             }

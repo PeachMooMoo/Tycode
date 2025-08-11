@@ -125,7 +125,7 @@ async fn async_main() -> Result<()> {
             .region(aws_config::Region::new(aws_region))
             .retry_config(
                 aws_config::retry::RetryConfig::adaptive()
-                    .with_max_attempts(15)
+                    .with_max_attempts(30)
                     .with_initial_backoff(std::time::Duration::from_millis(100))
                     .with_max_backoff(std::time::Duration::from_secs(1)),
             )

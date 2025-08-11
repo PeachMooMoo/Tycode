@@ -30,6 +30,11 @@ impl CommandHandler {
                 usage: "/clear".to_string(),
             },
             CommandInfo {
+                name: "context".to_string(),
+                description: "Show what files would be included in the AI context".to_string(),
+                usage: "/context".to_string(),
+            },
+            CommandInfo {
                 name: "fileapi".to_string(),
                 description: "Set the file modification API (patch or find-replace)".to_string(),
                 usage: "/fileapi <patch|findreplace>".to_string(),
@@ -69,6 +74,7 @@ impl CommandHandler {
 
         match parts[0] {
             "clear" => self.handle_clear_command().await,
+            "context" => self.handle_context_command().await,
             "fileapi" => self.handle_fileapi_command(&parts).await,
             "trace" => self.handle_trace_command(&parts).await,
             _ => vec![self.create_message(
@@ -81,6 +87,132 @@ impl CommandHandler {
     async fn handle_clear_command(&self) -> Vec<ChatMessage> {
         self.state.clear_conversation();
         vec![self.create_message("Conversation cleared.".to_string(), MessageSender::System)]
+    }
+
+    async fn handle_context_command(&self) -> Vec<ChatMessage> {
+        use crate::tools::context_utils::list_relevant_files;
+        use crate::tools::file_access::FileAccessManager;
+        use std::path::PathBuf;
+
+        let working_dir = PathBuf::from(".");
+
+        // Get relevant files (directory listing)
+        let relevant = list_relevant_files(&working_dir);
+
+        // Get tracked files
+        let tracked_files = self.state.get_tracked_files();
+        let file_manager = FileAccessManager::new(working_dir.clone());
+
+        let mut message = String::new();
+        message.push_str("=== AI Context Debug Info ===\n\n");
+
+        // Show directory listing info
+        message.push_str("DIRECTORY LISTING (file paths only):\n");
+        message.push_str(&format!("  Total files: {}\n", relevant.files.len()));
+        if relevant.truncated {
+            message.push_str("  ⚠️ WARNING: Directory listing was TRUNCATED (too many files)\n");
+        }
+
+        // Group files by directory for better readability
+        let mut dirs: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for file in &relevant.files {
+            let file_str = file.to_string_lossy().to_string();
+            if file_str == "..." {
+                continue; // Skip truncation marker
+            }
+            let dir = if let Some(parent) = file.parent() {
+                parent.to_string_lossy().to_string()
+            } else {
+                ".".to_string()
+            };
+            dirs.entry(dir).or_default().push(
+                file.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file_str.clone()),
+            );
+        }
+
+        let mut sorted_dirs: Vec<_> = dirs.into_iter().collect();
+        sorted_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (dir, mut files) in sorted_dirs {
+            files.sort();
+            let dir_display = if dir.is_empty() || dir == "." {
+                "."
+            } else {
+                &dir
+            };
+            message.push_str(&format!("\n  {}/ ({} files)\n", dir_display, files.len()));
+            for file in files.iter().take(5) {
+                message.push_str(&format!("    - {}\n", file));
+            }
+            if files.len() > 5 {
+                message.push_str(&format!("    ... and {} more\n", files.len() - 5));
+            }
+        }
+
+        // Calculate directory listing size
+        let dir_list_size: usize = relevant
+            .files
+            .iter()
+            .map(|p| p.to_string_lossy().len() + 1) // +1 for newline
+            .sum();
+        message.push_str(&format!(
+            "\n  Directory listing size: {} bytes\n",
+            dir_list_size
+        ));
+
+        // Show tracked files info
+        message.push_str("\n\nTRACKED FILES (full content sent):\n");
+        message.push_str(&format!("  Total tracked: {}\n", tracked_files.len()));
+
+        let mut total_tracked_size = 0;
+        let mut tracked_info = Vec::new();
+
+        for file_path in &tracked_files {
+            let path_str = file_path.to_string_lossy();
+            match file_manager.read_file(&path_str).await {
+                Ok(content) => {
+                    let size = content.len();
+                    total_tracked_size += size;
+                    tracked_info.push((path_str.to_string(), size));
+                }
+                Err(e) => {
+                    tracked_info.push((format!("{} (ERROR: {:?})", path_str, e), 0));
+                }
+            }
+        }
+
+        // Sort by size descending
+        tracked_info.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (path, size) in tracked_info {
+            message.push_str(&format!("    - {} ({} bytes)\n", path, size));
+        }
+
+        message.push_str(&format!(
+            "\n  Total tracked files size: {} bytes\n",
+            total_tracked_size
+        ));
+
+        // Show totals
+        message.push_str("\n\nTOTAL CONTEXT SIZE:\n");
+        let total_size = dir_list_size + total_tracked_size;
+        message.push_str(&format!(
+            "  {} bytes ({:.2} KB)\n",
+            total_size,
+            total_size as f64 / 1024.0
+        ));
+
+        if total_size > 100_000 {
+            message.push_str("\n  ⚠️ WARNING: Context is very large (>100KB). Consider:\n");
+            message.push_str("     - Clearing tracked files with /clear\n");
+            message.push_str("     - Adding more patterns to .gitignore\n");
+            message.push_str("     - Working in a subdirectory\n");
+        }
+
+        vec![self.create_message(message, MessageSender::System)]
     }
 
     async fn handle_fileapi_command(&self, parts: &[&str]) -> Vec<ChatMessage> {
