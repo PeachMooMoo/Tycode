@@ -142,6 +142,25 @@
     font-size: 13px;
     color: var(--text-color);
     margin-right: 8px;
+    user-select: none;
+    cursor: default;
+}
+
+.tab-title-input {
+    flex: 1;
+    background: var(--input-background);
+    border: 1px solid var(--vscode-focusBorder);
+    color: var(--text-color);
+    font-size: 13px;
+    padding: 2px 4px;
+    margin-right: 8px;
+    border-radius: 2px;
+    outline: none;
+    font-family: inherit;
+}
+
+.tab.editing {
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
 }
 
 .tab-close {
@@ -321,4 +340,50 @@
         opacity: 0;
         transform: translateX(-10px);
     }
+}
+
+/* Tab Context Menu Styles */
+.tab-context-menu {
+    background: var(--vscode-menu-background, var(--input-background));
+    border: 1px solid var(--vscode-menu-border, var(--border-color));
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    padding: 4px 0;
+    min-width: 120px;
+    z-index: 1000;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--vscode-menu-foreground, var(--text-color));
+    font-size: 13px;
+    transition: background-color 0.1s;
+}
+
+.context-menu-item:hover {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)));
+}
+
+.context-menu-icon {
+    margin-right: 8px;
+    font-size: 14px;
+    width: 20px;
+    text-align: center;
+}
+
+/* Double-click hint on tab hover */
+.tab:hover .tab-title::after {
+    content: " (double-click to rename)";
+    font-size: 11px;
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.tab.editing:hover .tab-title::after,
+.tab.active:hover .tab-title::after {
+    content: "";
 }

@@ -143,7 +143,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
     private async handleNewChat(): Promise<void> {
         try {
-            const conversation = await this.conversationManager.createConversation('New Chat');
+            const conversation = await this.conversationManager.createConversation();
             this.sendToWebview({
                 type: 'showTyping',
                 conversationId: conversation.id,
@@ -239,16 +239,23 @@ export class MainProvider implements vscode.WebviewViewProvider {
     }
 
     public async sendMessageToActiveChat(message: string): Promise<void> {
-        const conversation = this.conversationManager.getActiveConversation();
+        let conversation = this.conversationManager.getActiveConversation();
         if (!conversation) {
-            // Create a new chat if none exists
-            await this.handleNewChat();
-            // Get the newly created conversation
-            const newConversation = this.conversationManager.getActiveConversation();
-            if (newConversation) {
-                await this.handleSendMessage(newConversation.id, message);
+            // Create a new chat if none exists (without a default title)
+            try {
+                conversation = await this.conversationManager.createConversation();
+                this.sendToWebview({
+                    type: 'showTyping',
+                    conversationId: conversation.id,
+                    show: false
+                });
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to create new chat: ${error}`);
+                return;
             }
-        } else {
+        }
+        
+        if (conversation) {
             await this.handleSendMessage(conversation.id, message);
         }
     }

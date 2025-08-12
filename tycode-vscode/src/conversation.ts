@@ -18,6 +18,8 @@ export class Conversation extends EventEmitter {
     private _title: string;
     private _messages: ConversationMessage[] = [];
     private _isActive: boolean = false;
+    private _isManuallyNamed: boolean = false;
+    private _hasFirstMessage: boolean = false;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -26,7 +28,8 @@ export class Conversation extends EventEmitter {
     ) {
         super();
         this._id = id;
-        this._title = title || `Chat ${id.slice(0, 8)}`;
+        this._title = title || 'New Chat';
+        this._isManuallyNamed = !!title;
         this.bridge = new SubprocessBridge(context);
     }
 
@@ -40,6 +43,7 @@ export class Conversation extends EventEmitter {
 
     set title(value: string) {
         this._title = value;
+        this._isManuallyNamed = true;  // Mark as manually named when user sets title
         this.emit('titleChanged', value);
     }
 
@@ -109,8 +113,56 @@ export class Conversation extends EventEmitter {
         this._messages.push(userMessage);
         this.emit('userMessage', userMessage);
 
+        // Auto-generate title from first message if not manually named
+        if (!this._hasFirstMessage && !this._isManuallyNamed) {
+            this._hasFirstMessage = true;
+            const generatedTitle = this.generateTitleFromMessage(content);
+            if (generatedTitle && generatedTitle !== this._title) {
+                this._title = generatedTitle;
+                // Don't mark as manually named since this is auto-generated
+                this.emit('titleChanged', generatedTitle);
+            }
+        }
+
         // Send to subprocess
         await this.bridge.sendMessage(content);
+    }
+
+    private generateTitleFromMessage(message: string): string {
+        // Remove leading/trailing whitespace
+        let title = message.trim();
+        
+        // Remove code blocks for cleaner titles
+        title = title.replace(/```[\s\S]*?```/g, '[code]');
+        title = title.replace(/`[^`]+`/g, '...');
+        
+        // Remove URLs
+        title = title.replace(/https?:\/\/[^\s]+/g, '[link]');
+        
+        // Remove excessive whitespace
+        title = title.replace(/\s+/g, ' ');
+        
+        // Take first line/sentence
+        const firstLine = title.split('\n')[0];
+        const firstSentence = firstLine.split(/[.!?]/)[0];
+        
+        // Use whichever is shorter but meaningful
+        title = firstSentence.length > 10 ? firstSentence : firstLine;
+        
+        // Truncate if too long (keep it concise)
+        const maxLength = 40;
+        if (title.length > maxLength) {
+            title = title.substring(0, maxLength - 3) + '...';
+        }
+        
+        // Fallback if message is too short or empty after processing
+        if (title.length < 3) {
+            // Try to extract something meaningful from original
+            const words = message.trim().split(/\s+/).slice(0, 5).join(' ');
+            title = words.length > 3 ? words : 'New Chat';
+        }
+        
+        return title;
     }
 
     clearMessages(): void {

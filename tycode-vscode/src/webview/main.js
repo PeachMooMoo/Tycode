@@ -104,13 +104,48 @@
         tab.dataset.conversationId = id;
         tab.innerHTML = `
             <span class="tab-title">${escapeHtml(title)}</span>
+            <input class="tab-title-input" type="text" value="${escapeHtml(title)}" style="display: none;">
             <button class="tab-close" title="Close">×</button>
         `;
 
+        const tabTitle = tab.querySelector('.tab-title');
+        const tabInput = tab.querySelector('.tab-title-input');
+        let isEditing = false;
+
+        // Double-click to edit title
+        tabTitle.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            startEditingTitle(id, tab, tabTitle, tabInput);
+        });
+
+        // Click to switch tabs (only if not editing)
         tab.addEventListener('click', (e) => {
-            if (!e.target.classList.contains('tab-close')) {
+            if (!e.target.classList.contains('tab-close') && !isEditing) {
                 vscode.postMessage({ type: 'switchTab', conversationId: id });
             }
+        });
+
+        // Handle input events
+        tabInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                saveTabTitle(id, tab, tabTitle, tabInput);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEditingTitle(id, tab, tabTitle, tabInput);
+            }
+        });
+
+        tabInput.addEventListener('blur', () => {
+            if (tabInput.style.display !== 'none') {
+                saveTabTitle(id, tab, tabTitle, tabInput);
+            }
+        });
+
+        // Right-click context menu
+        tab.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showTabContextMenu(e, id, tab, tabTitle, tabInput);
         });
 
         tab.querySelector('.tab-close').addEventListener('click', (e) => {
@@ -369,7 +404,14 @@
         const conversation = conversations.get(message.id);
         if (conversation) {
             conversation.title = message.title;
-            conversation.tabElement.querySelector('.tab-title').textContent = message.title;
+            
+            // Update tab elements
+            const titleElement = conversation.tabElement.querySelector('.tab-title');
+            const inputElement = conversation.tabElement.querySelector('.tab-title-input');
+            if (titleElement) titleElement.textContent = message.title;
+            if (inputElement) inputElement.value = message.title;
+            
+            // Update header
             conversation.viewElement.querySelector('.chat-header h3').textContent = message.title;
         }
     }
@@ -499,5 +541,106 @@
             actionsDiv.appendChild(insertButton);
             block.appendChild(actionsDiv);
         });
+    }
+
+    function startEditingTitle(conversationId, tab, titleElement, inputElement) {
+        // Show input, hide title
+        titleElement.style.display = 'none';
+        inputElement.style.display = 'block';
+        inputElement.value = titleElement.textContent;
+        inputElement.select();
+        inputElement.focus();
+        
+        // Mark tab as editing
+        tab.classList.add('editing');
+    }
+
+    function saveTabTitle(conversationId, tab, titleElement, inputElement) {
+        const newTitle = inputElement.value.trim();
+        
+        // Don't save empty titles
+        if (!newTitle) {
+            cancelEditingTitle(conversationId, tab, titleElement, inputElement);
+            return;
+        }
+        
+        // Only send message if title actually changed
+        if (newTitle !== titleElement.textContent) {
+            vscode.postMessage({
+                type: 'renameTab',
+                conversationId: conversationId,
+                title: newTitle
+            });
+            
+            // Update the displayed title immediately for responsiveness
+            titleElement.textContent = newTitle;
+            inputElement.value = newTitle;
+        }
+        
+        // Hide input, show title
+        inputElement.style.display = 'none';
+        titleElement.style.display = 'block';
+        tab.classList.remove('editing');
+    }
+
+    function cancelEditingTitle(conversationId, tab, titleElement, inputElement) {
+        // Restore original value
+        inputElement.value = titleElement.textContent;
+        
+        // Hide input, show title
+        inputElement.style.display = 'none';
+        titleElement.style.display = 'block';
+        tab.classList.remove('editing');
+    }
+
+    function showTabContextMenu(event, conversationId, tab, titleElement, inputElement) {
+        // Remove any existing context menu
+        const existingMenu = document.querySelector('.tab-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+
+        // Create context menu
+        const menu = document.createElement('div');
+        menu.className = 'tab-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.left = event.clientX + 'px';
+        menu.style.top = event.clientY + 'px';
+        menu.innerHTML = `
+            <div class="context-menu-item" data-action="rename">
+                <span class="context-menu-icon">✏️</span>
+                Rename
+            </div>
+            <div class="context-menu-item" data-action="close">
+                <span class="context-menu-icon">✖️</span>
+                Close
+            </div>
+        `;
+
+        // Handle menu item clicks
+        menu.addEventListener('click', (e) => {
+            const item = e.target.closest('.context-menu-item');
+            if (item) {
+                const action = item.dataset.action;
+                if (action === 'rename') {
+                    startEditingTitle(conversationId, tab, titleElement, inputElement);
+                } else if (action === 'close') {
+                    vscode.postMessage({ type: 'closeTab', conversationId: conversationId });
+                }
+                menu.remove();
+            }
+        });
+
+        // Close menu when clicking outside
+        setTimeout(() => {
+            document.addEventListener('click', function closeMenu(e) {
+                if (!menu.contains(e.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            });
+        }, 0);
+
+        document.body.appendChild(menu);
     }
 })();
