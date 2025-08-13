@@ -133,6 +133,7 @@ export class SubprocessBridge extends EventEmitter {
     }
 
     private handleMessage(message: SubprocessMessage) {
+        console.log('[SubprocessBridge] Received message:', message.type, message);
         this.emit('message', message);
 
         // Emit specific events based on message type
@@ -147,6 +148,15 @@ export class SubprocessBridge extends EventEmitter {
                     is_complete: message.is_complete,
                     context_info: message.context_info,
                     token_usage: message.token_usage
+                });
+                break;
+            case 'ToolResult':
+                console.log('[SubprocessBridge] Emitting toolResult event:', message);
+                this.emit('toolResult', {
+                    tool_name: message.tool_name,
+                    success: message.success,
+                    result: message.result,
+                    error: message.error
                 });
                 break;
             case 'Event':

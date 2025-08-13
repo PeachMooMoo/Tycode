@@ -172,11 +172,30 @@ impl SubprocessApp {
                 MessageSender::Error => Some(SubprocessMessage::Error { error: msg.content }),
                 MessageSender::User => None,
             },
+            ChatEvent::ToolExecutionCompleted {
+                tool_name,
+                success,
+                result,
+                error,
+            } => {
+                eprintln!("subprocess_app: Received ToolExecutionCompleted event: tool={}, success={}", tool_name, success);
+                Some(SubprocessMessage::ToolResult {
+                    tool_name,
+                    success,
+                    result,
+                    error,
+                })
+            },
             ChatEvent::TypingStatusChanged(_) => None, // Ignore typing status - not useful
             _ => None,
         };
 
         if let Some(msg) = message {
+            // Log what we're about to send
+            if let SubprocessMessage::ToolResult { ref tool_name, ref success, .. } = msg {
+                eprintln!("subprocess_app: Sending ToolResult to stdout: tool={}, success={}", tool_name, success);
+            }
+            
             let json = serde_json::to_string(&msg)?;
             println!("{}", json);
             std::io::stdout().flush()?;

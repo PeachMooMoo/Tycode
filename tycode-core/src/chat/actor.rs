@@ -7,7 +7,7 @@ use crate::ai::{
 use crate::ai::{ContentBlock, ModelSettings};
 use crate::chat::{
     commands::CommandHandler,
-    events::{ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource},
+    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource},
     state::SharedChatState,
 };
 use crate::settings::SettingsManager;
@@ -291,6 +291,39 @@ impl ChatActor {
                                 ?result,
                                 "Tool execution completed"
                             );
+
+                            // Emit tool completion event
+                            let parsed_result = if !result.is_error {
+                                serde_json::from_str(&result.content).ok()
+                            } else {
+                                None
+                            };
+                            
+                            info!(
+                                "Emitting ToolExecutionCompleted event: tool={}, success={}, has_result={}, has_error={}",
+                                tool_use.name,
+                                !result.is_error,
+                                parsed_result.is_some(),
+                                result.is_error
+                            );
+                            
+                            let event = ChatEvent::ToolExecutionCompleted {
+                                tool_name: tool_use.name.clone(),
+                                success: !result.is_error,
+                                result: parsed_result,
+                                error: if result.is_error {
+                                    Some(result.content.clone())
+                                } else {
+                                    None
+                                },
+                            };
+                            
+                            // Send the event through the broadcast channel
+                            if let Err(e) = self.state.event_tx.send(event.clone()) {
+                                error!("Failed to send tool completion event: {:?}", e);
+                            } else {
+                                info!("Successfully sent tool completion event for {}", tool_use.name);
+                            }
 
                             self.current_agent_mut().conversation.push(Message {
                                 role: MessageRole::User,

@@ -44,6 +44,8 @@
 
     // Keep track of current AI response group
     let currentResponseGroup = null;
+    // Keep track of tool results for the current response
+    let pendingToolResults = new Map();
 
     function displayMessage(role, content, details, model, isComplete, reasoning, toolCalls, tokenUsage) {
         // Special handling for AI response components
@@ -62,7 +64,7 @@
                 // Include model info if available
                 const modelInfo = model ? `<div class="model-info">Model: ${model}</div>` : '';
                 const completionInfo = isComplete !== undefined ?
-                    `<div class="completion-info">${isComplete ? '✅ Complete' : '⏳ Pending tool execution'}</div>` : '';
+                    `<div class="completion-info">${isComplete ? '✅ Complete' : '⏳ Pending AI response'}</div>` : '';
 
                 // Build token usage info if available
                 let tokenInfo = '';
@@ -99,12 +101,20 @@
                 // Build tool calls section if present
                 let toolCallsSection = '';
                 if (toolCalls && toolCalls.length > 0) {
-                    const toolCallsHtml = toolCalls.map(toolCall => `
-                        <div class="tool-call-item">
-                            <div class="tool-header">🔧 ${toolCall.name}</div>
-                            ${toolCall.arguments ? `<div class="tool-details"><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre></div>` : ''}
-                        </div>
-                    `).join('');
+                    const toolCallsHtml = toolCalls.map(toolCall => {
+                        const toolId = `tool-${Date.now()}-${toolCall.name}`;
+                        return `
+                            <div class="tool-call-item" data-tool-name="${toolCall.name}" id="${toolId}">
+                                <div class="tool-header">
+                                    <span class="tool-status-icon">⏳</span>
+                                    <span class="tool-name">${toolCall.name}</span>
+                                    <span class="tool-status-text">Executing...</span>
+                                </div>
+                                ${toolCall.arguments ? `<div class="tool-details"><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre></div>` : ''}
+                                <div class="tool-result" style="display: none;"></div>
+                            </div>
+                        `;
+                    }).join('');
 
                     toolCallsSection = `
                         <div class="embedded-tool-calls">
@@ -189,6 +199,90 @@
                 toggle.textContent = '▶';
             }
         }
+    }
+
+    function displayToolResult(toolName, success, result, error) {
+        console.log('Tool result received:', { toolName, success, result, error });
+        
+        // Find the most recent tool call item with this name
+        const toolItems = document.querySelectorAll(`.tool-call-item[data-tool-name="${toolName}"]`);
+        if (toolItems.length === 0) {
+            console.warn('No tool item found for:', toolName);
+            return;
+        }
+        
+        // Get the last one (most recent)
+        const toolItem = toolItems[toolItems.length - 1];
+        
+        // Update status icon and text
+        const statusIcon = toolItem.querySelector('.tool-status-icon');
+        const statusText = toolItem.querySelector('.tool-status-text');
+        const resultDiv = toolItem.querySelector('.tool-result');
+        
+        if (success) {
+            statusIcon.textContent = '✅';
+            statusText.textContent = 'Success';
+            toolItem.classList.add('tool-success');
+        } else {
+            statusIcon.textContent = '❌';
+            statusText.textContent = 'Failed';
+            toolItem.classList.add('tool-error');
+        }
+        
+        // Display result if available
+        if (result || error) {
+            resultDiv.style.display = 'block';
+            
+            // Format the result based on tool type
+            let resultContent = '';
+            if (error) {
+                resultContent = `<div class="tool-error-message">${escapeHtml(error)}</div>`;
+            } else if (result) {
+                // Special formatting for different tool types
+                if (toolName === 'write_file' || toolName === 'replace_in_file') {
+                    // File modification tools
+                    if (result.path) {
+                        resultContent = `<div class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</div>`;
+                        if (result.changes_applied !== undefined) {
+                            resultContent += `<div class="tool-detail">Changes applied: ${result.changes_applied}</div>`;
+                        }
+                    } else {
+                        resultContent = `<div class="tool-success-message">✓ File operation completed</div>`;
+                    }
+                } else if (toolName === 'delete_file') {
+                    if (result.path) {
+                        resultContent = `<div class="tool-success-message">✓ Deleted: ${escapeHtml(result.path)}</div>`;
+                    }
+                } else if (toolName === 'read_file') {
+                    if (result.content) {
+                        const lines = result.content.split('\n').length;
+                        resultContent = `<div class="tool-success-message">✓ Read ${lines} lines</div>`;
+                    }
+                } else if (toolName === 'list_files') {
+                    if (result.files && Array.isArray(result.files)) {
+                        resultContent = `<div class="tool-success-message">✓ Found ${result.files.length} files</div>`;
+                    }
+                } else if (toolName === 'execute_command') {
+                    if (result.exit_code !== undefined) {
+                        const exitStatus = result.exit_code === 0 ? '✓' : '⚠';
+                        resultContent = `<div class="tool-success-message">${exitStatus} Exit code: ${result.exit_code}</div>`;
+                        if (result.stdout) {
+                            resultContent += `<details><summary>Output</summary><pre>${escapeHtml(result.stdout)}</pre></details>`;
+                        }
+                        if (result.stderr) {
+                            resultContent += `<details><summary>Errors</summary><pre>${escapeHtml(result.stderr)}</pre></details>`;
+                        }
+                    }
+                } else {
+                    // Generic result display
+                    resultContent = `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+                }
+            }
+            
+            resultDiv.innerHTML = resultContent;
+        }
+        
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function renderContent(content) {
@@ -297,6 +391,14 @@
                     message.reasoning,
                     message.toolCalls,
                     message.tokenUsage
+                );
+                break;
+            case 'toolResult':
+                displayToolResult(
+                    message.toolName,
+                    message.success,
+                    message.result,
+                    message.error
                 );
                 break;
             case 'showTyping':

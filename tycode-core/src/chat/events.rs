@@ -11,6 +11,12 @@ pub enum ChatEvent {
         model: crate::ai::types::Model,
         source: ModelSource,
     },
+    ToolExecutionCompleted {
+        tool_name: String,
+        success: bool,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+    },
     Error(String),
 }
 

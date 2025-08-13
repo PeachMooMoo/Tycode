@@ -9,3 +9,4 @@ yarn-error.log*
 *.log
 .DS_Store
 /binaries/
+src/build-info.ts

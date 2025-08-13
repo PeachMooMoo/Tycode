@@ -198,17 +198,57 @@ body {
 }
 
 .tool-call-item {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+    padding: 4px 0;
+    transition: all 0.3s ease;
 }
 
 .tool-call-item:last-child {
     margin-bottom: 0;
 }
 
+.tool-call-item.tool-success {
+    border-left-color: var(--vscode-terminal-ansiGreen);
+}
+
+.tool-call-item.tool-error {
+    border-left-color: var(--vscode-terminal-ansiRed);
+}
+
 .embedded-tool-calls .tool-header {
     font-weight: 600;
     margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tool-status-icon {
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+}
+
+.tool-name {
     color: var(--vscode-terminal-ansiBlue);
+}
+
+.tool-status-text {
+    font-size: 11px;
+    color: var(--secondary-text);
+    font-weight: normal;
+    margin-left: auto;
+}
+
+.tool-call-item.tool-success .tool-name {
+    color: var(--vscode-terminal-ansiGreen);
+}
+
+.tool-call-item.tool-error .tool-name {
+    color: var(--vscode-terminal-ansiRed);
 }
 
 .embedded-tool-calls .tool-details {
@@ -220,6 +260,60 @@ body {
     padding: 4px 6px;
     border-radius: 3px;
     margin-top: 2px;
+    margin-left: 24px;
+}
+
+.tool-result {
+    margin-top: 6px;
+    margin-left: 24px;
+    padding: 4px 6px;
+    background: var(--code-background);
+    border-radius: 3px;
+    font-size: 12px;
+    animation: fadeIn 0.3s ease;
+}
+
+.tool-success-message {
+    color: var(--vscode-terminal-ansiGreen);
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.tool-error-message {
+    color: var(--vscode-terminal-ansiRed);
+    font-weight: 500;
+}
+
+.tool-detail {
+    font-size: 11px;
+    color: var(--secondary-text);
+    margin-top: 2px;
+}
+
+.tool-result details {
+    margin-top: 4px;
+}
+
+.tool-result summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--secondary-text);
+    user-select: none;
+}
+
+.tool-result summary:hover {
+    color: var(--text-color);
+}
+
+.tool-result details pre {
+    margin-top: 4px;
+    padding: 4px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    font-size: 11px;
+    max-height: 200px;
+    overflow: auto;
 }
 
 .reasoning-header {

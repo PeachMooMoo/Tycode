@@ -23,6 +23,14 @@ pub enum SubprocessMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         token_usage: Option<TokenUsage>,
     },
+    ToolResult {
+        tool_name: String,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     Event {
         event: String,
         data: serde_json::Value,

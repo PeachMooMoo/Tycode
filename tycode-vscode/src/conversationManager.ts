@@ -36,6 +36,10 @@ export class ConversationManager extends EventEmitter {
             this.emit('conversationUpdate', id, 'error', message);
         });
 
+        conversation.on('toolResult', (result) => {
+            this.emit('conversationUpdate', id, 'toolResult', result);
+        });
+
         conversation.on('titleChanged', (newTitle) => {
             this.emit('conversationTitleChanged', id, newTitle);
         });

@@ -80,7 +80,7 @@ impl ChatState {
 #[derive(Clone)]
 pub struct SharedChatState {
     inner: Arc<Mutex<ChatState>>,
-    event_tx: broadcast::Sender<ChatEvent>,
+    pub event_tx: broadcast::Sender<ChatEvent>,
 }
 
 impl SharedChatState {

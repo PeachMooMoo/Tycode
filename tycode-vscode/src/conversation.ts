@@ -94,6 +94,20 @@ export class Conversation extends EventEmitter {
             this.emit('error', message);
         });
 
+        this.bridge.on('toolResult', (result: any) => {
+            console.log('[Conversation] Received toolResult:', result);
+            const message: ConversationMessage = {
+                role: 'tool-result',
+                content: JSON.stringify(result),
+                toolName: result.tool_name,
+                success: result.success,
+                result: result.result,
+                error: result.error
+            } as any;
+            this._messages.push(message);
+            this.emit('toolResult', result);
+        });
+
         this.bridge.on('disconnected', () => {
             this._isActive = false;
             this.emit('disconnected');

@@ -15,6 +15,9 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         this._extensionUri = _context.extensionUri;
         this._bridge = bridge;
 
+        console.log('[ChatProvider] Constructor - setting up event listeners');
+        console.log('[ChatProvider] Bridge listeners before:', this._bridge.eventNames());
+
         // Set up event listeners for subprocess responses
         this._bridge.on('response', (response: any) => {
             if (this._view) {
@@ -34,6 +37,26 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                 this._messageHistory.push({ role: 'assistant', content: response.content });
             }
         });
+
+        this._bridge.on('toolResult', (result: any) => {
+            console.log('[ChatProvider] Received toolResult event:', result);
+            if (this._view) {
+                const message = {
+                    type: 'toolResult',
+                    toolName: result.tool_name,
+                    success: result.success,
+                    result: result.result,
+                    error: result.error
+                };
+                console.log('[ChatProvider] Posting to webview:', message);
+                this._view.webview.postMessage(message);
+            } else {
+                console.log('[ChatProvider] No view available to post toolResult');
+            }
+        });
+
+        console.log('[ChatProvider] Bridge listeners after:', this._bridge.eventNames());
+        console.log('[ChatProvider] Bridge toolResult listener count:', this._bridge.listenerCount('toolResult'));
 
         this._bridge.on('event', (event: string, data: any) => {
             if (this._view) {

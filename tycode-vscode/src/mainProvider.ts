@@ -2,6 +2,15 @@ import * as vscode from 'vscode';
 import { ConversationManager } from './conversationManager';
 import { Conversation, ConversationMessage } from './conversation';
 
+// Import build info - will be generated at build time
+let buildInfo = { buildTime: 'dev', timestamp: new Date().toISOString() };
+try {
+    const buildModule = require('./build-info');
+    buildInfo = buildModule.buildInfo;
+} catch (e) {
+    // Build info not available in dev mode
+}
+
 export class MainProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private conversationManager: ConversationManager;
@@ -23,6 +32,20 @@ export class MainProvider implements vscode.WebviewViewProvider {
         });
 
         this.conversationManager.on('conversationUpdate', (id: string, updateType: string, message: ConversationMessage) => {
+            // Handle tool results separately
+            if (updateType === 'toolResult') {
+                console.log('[MainProvider] Forwarding toolResult to webview:', id, message);
+                this.sendToWebview({
+                    type: 'toolResult',
+                    conversationId: id,
+                    toolName: (message as any).tool_name,
+                    success: (message as any).success,
+                    result: (message as any).result,
+                    error: (message as any).error
+                });
+                return;
+            }
+            
             this.sendToWebview({
                 type: 'conversationMessage',
                 conversationId: id,
@@ -296,6 +319,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                                 <button id="welcome-new-chat" class="welcome-button primary">New Chat</button>
                                 <button id="welcome-settings" class="welcome-button">Settings</button>
                             </div>
+                            <div class="build-info">Build ${buildInfo.buildTime}</div>
                         </div>
                     </div>
 

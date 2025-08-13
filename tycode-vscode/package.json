@@ -93,10 +93,10 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "node scripts/generate-build-info.js && tsc -p ./",
     "watch": "tsc -watch -p ./",
     "build": "npm run compile",
-    "package": "vsce package",
+    "package": "node scripts/generate-build-info.js && vsce package",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
