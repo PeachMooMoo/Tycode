@@ -34,15 +34,36 @@ export class SubprocessBridge extends EventEmitter {
             throw new Error(`tycode binary not found at: ${cliPath}`);
         }
 
-        // Get the current workspace folder
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : process.cwd();
+        // Get all workspace folders
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        let workspaceRoots: string[] = [];
+        let cwd: string;
+
+        if (workspaceFolders && workspaceFolders.length > 0) {
+            // Collect all workspace roots
+            workspaceRoots = workspaceFolders.map(folder => folder.uri.fsPath);
+            // Use first workspace folder as working directory
+            cwd = workspaceFolders[0].uri.fsPath;
+        } else {
+            // No workspace folders, use current working directory
+            cwd = process.cwd();
+            workspaceRoots = [cwd];
+        }
 
         console.log('Spawning subprocess:', cliPath);
         console.log('Working directory:', cwd);
+        console.log('Workspace roots:', workspaceRoots);
 
-        // Spawn the subprocess with the workspace folder as working directory
-        this.child = spawn(cliPath, ['--subprocess', '--profile', awsProfile], {
+        // Build command arguments
+        const args = ['--subprocess', '--profile', awsProfile];
+        
+        // Add workspace roots if we have multiple
+        if (workspaceRoots.length > 0) {
+            args.push('--workspace-roots', workspaceRoots.join(','));
+        }
+
+        // Spawn the subprocess with the workspace folders
+        this.child = spawn(cliPath, args, {
             stdio: ['pipe', 'pipe', 'pipe'],
             cwd: cwd
         });

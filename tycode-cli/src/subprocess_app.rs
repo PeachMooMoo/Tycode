@@ -16,9 +16,10 @@ impl SubprocessApp {
     pub async fn new(
         provider: BedrockProvider,
         tunings: ModelSettings,
+        workspace_roots: Option<Vec<std::path::PathBuf>>,
         settings: Option<Arc<SettingsManager>>,
     ) -> Result<Self> {
-        let base = BaseApp::new(provider, tunings, settings).await?;
+        let base = BaseApp::new(provider, tunings, workspace_roots, settings).await?;
 
         // Send ready signal
         let ready_msg = serde_json::to_string(&SubprocessMessage::Ready)?;

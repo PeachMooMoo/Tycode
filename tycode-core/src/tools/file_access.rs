@@ -9,14 +9,14 @@ use walkdir::WalkDir;
 
 #[derive(Clone)]
 pub struct FileAccessManager {
-    workspace_root: PathBuf,
+    workspace_roots: Vec<PathBuf>,
     max_file_size: usize,
 }
 
 impl FileAccessManager {
-    pub fn new(workspace_root: PathBuf) -> Self {
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
         Self {
-            workspace_root,
+            workspace_roots,
             max_file_size: 10 * 1024 * 1024, // 10MB
         }
     }
@@ -83,11 +83,8 @@ impl FileAccessManager {
         Ok(())
     }
 
-    pub async fn list_directory(&self, directory_path: Option<&str>) -> Result<Vec<PathBuf>> {
-        let dir_path = match directory_path {
-            Some(path) => self.validate_path(path)?,
-            None => self.workspace_root.clone(),
-        };
+    pub async fn list_directory(&self, directory_path: &str) -> Result<Vec<PathBuf>> {
+        let dir_path = self.validate_path(directory_path)?;
 
         if !dir_path.exists() {
             anyhow::bail!("Directory not found: {}", dir_path.display());
@@ -184,40 +181,80 @@ impl FileAccessManager {
         Ok(results)
     }
 
-    pub fn workspace_root(&self) -> &PathBuf {
-        &self.workspace_root
+    pub fn workspace_roots(&self) -> &[PathBuf] {
+        &self.workspace_roots
     }
 
     pub fn validate_path(&self, file_path: &str) -> Result<PathBuf> {
         let path = Path::new(file_path);
 
-        let full_path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.workspace_root.join(path)
-        };
+        // If absolute path, check if it's within any workspace root
+        if path.is_absolute() {
+            for workspace_root in &self.workspace_roots {
+                let canonical_workspace = workspace_root.canonicalize().with_context(|| {
+                    format!(
+                        "Failed to canonicalize workspace root: {:?}",
+                        workspace_root
+                    )
+                })?;
 
-        let canonical_workspace = self.workspace_root.canonicalize().with_context(|| {
-            format!(
-                "Failed to canonicalize workspace root: {:?}",
-                self.workspace_root
-            )
-        })?;
-
-        if let Ok(canonical_path) = full_path.canonicalize() {
-            if !canonical_path.starts_with(&canonical_workspace) {
-                anyhow::bail!("Path is outside workspace root: {}", file_path);
+                if let Ok(canonical_path) = path.canonicalize() {
+                    if canonical_path.starts_with(&canonical_workspace) {
+                        return Ok(path.to_path_buf());
+                    }
+                } else {
+                    // Check parent for new files
+                    let parent_path = path.parent().unwrap_or(path);
+                    if let Ok(canonical_parent) = parent_path.canonicalize() {
+                        if canonical_parent.starts_with(&canonical_workspace) {
+                            return Ok(path.to_path_buf());
+                        }
+                    }
+                }
             }
-        } else {
+            anyhow::bail!("Path is outside all workspace roots: {}", file_path);
+        }
+
+        // For relative paths, try each workspace root
+        for workspace_root in &self.workspace_roots {
+            let full_path = workspace_root.join(path);
+            
+            // Check if file exists in this root
+            if full_path.exists() {
+                let canonical_workspace = workspace_root.canonicalize().with_context(|| {
+                    format!(
+                        "Failed to canonicalize workspace root: {:?}",
+                        workspace_root
+                    )
+                })?;
+
+                if let Ok(canonical_path) = full_path.canonicalize() {
+                    if canonical_path.starts_with(&canonical_workspace) {
+                        return Ok(full_path);
+                    }
+                }
+            }
+        }
+
+        // File doesn't exist in any root, use first root for new files
+        if let Some(first_root) = self.workspace_roots.first() {
+            let full_path = first_root.join(path);
+            let canonical_workspace = first_root.canonicalize().with_context(|| {
+                format!("Failed to canonicalize workspace root: {:?}", first_root)
+            })?;
+
+            // Check parent directory for new files
             let parent_path = full_path.parent().unwrap_or(&full_path);
             if let Ok(canonical_parent) = parent_path.canonicalize() {
                 if !canonical_parent.starts_with(&canonical_workspace) {
                     anyhow::bail!("Path is outside workspace root: {}", file_path);
                 }
             }
-        }
 
-        Ok(full_path)
+            Ok(full_path)
+        } else {
+            anyhow::bail!("No workspace roots configured");
+        }
     }
 }
 

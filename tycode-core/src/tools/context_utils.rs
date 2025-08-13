@@ -9,27 +9,64 @@ const MAX_OUTPUT_SIZE_BYTES: usize = 8192; // 8KB limit
 pub struct RelevantFiles {
     pub files: Vec<PathBuf>,
     pub truncated: bool,
+    pub workspace_roots: Vec<PathBuf>,
 }
 
-pub fn list_relevant_files(working_dir: &Path) -> RelevantFiles {
-    let ignored = load_gitignore_patterns(working_dir);
-    let mut files = Vec::new();
+pub fn list_relevant_files(working_dirs: &[PathBuf]) -> RelevantFiles {
+    let mut all_files = Vec::new();
     let mut truncated = false;
     let mut total_size = 0usize;
+    let use_workspace_prefix = working_dirs.len() > 1;
 
-    if let Err(e) = collect_files(
-        working_dir,
-        working_dir,
-        &ignored,
-        &mut files,
-        &mut truncated,
-        &mut total_size,
-    ) {
-        warn!(?e, "Error collecting files");
+    for working_dir in working_dirs {
+        if total_size >= MAX_OUTPUT_SIZE_BYTES {
+            truncated = true;
+            break;
+        }
+
+        let ignored = load_gitignore_patterns(working_dir);
+        
+        let workspace_name = if use_workspace_prefix {
+            Some(working_dir.file_name()
+                .unwrap_or(working_dir.as_os_str())
+                .to_string_lossy()
+                .to_string())
+        } else {
+            None
+        };
+
+        let mut workspace_files = Vec::new();
+        
+        if let Err(e) = collect_files(
+            working_dir,
+            working_dir,
+            &ignored,
+            &mut workspace_files,
+            &mut truncated,
+            &mut total_size,
+        ) {
+            warn!(?e, "Error collecting files from {:?}", working_dir);
+        }
+
+        // Prefix files with workspace name if we have multiple workspaces
+        if let Some(ws_name) = workspace_name {
+            for file in workspace_files {
+                let prefixed = PathBuf::from(format!("[{}]/{}", ws_name, file.display()));
+                all_files.push(prefixed);
+            }
+        } else {
+            all_files.extend(workspace_files);
+        }
     }
 
-    RelevantFiles { files, truncated }
+    RelevantFiles { 
+        files: all_files, 
+        truncated,
+        workspace_roots: working_dirs.to_vec(),
+    }
 }
+
+
 
 fn collect_files(
     base_dir: &Path,
@@ -39,7 +76,6 @@ fn collect_files(
     truncated: &mut bool,
     total_size: &mut usize,
 ) -> std::io::Result<()> {
-    // Check size limit
     if *total_size >= MAX_OUTPUT_SIZE_BYTES {
         *truncated = true;
         return Ok(());
@@ -68,7 +104,6 @@ fn collect_files(
         }
     }
 
-    // Add files with size tracking
     let files_to_add = if dir_files.len() > MAX_FILES_PER_DIR {
         *truncated = true;
         dir_files.into_iter().take(MAX_FILES_PER_DIR).collect::<Vec<_>>()
@@ -78,7 +113,7 @@ fn collect_files(
 
     for file in files_to_add {
         let file_str = file.to_string_lossy();
-        *total_size += file_str.len() + 1; // +1 for newline
+        *total_size += file_str.len() + 1;
         
         if *total_size >= MAX_OUTPUT_SIZE_BYTES {
             *truncated = true;
@@ -89,7 +124,6 @@ fn collect_files(
         files.push(file);
     }
 
-    // Process subdirectories
     for subdir in subdirs {
         if *total_size >= MAX_OUTPUT_SIZE_BYTES {
             *truncated = true;
@@ -132,56 +166,45 @@ fn load_gitignore_patterns(working_dir: &Path) -> HashSet<String> {
 fn is_ignored(path: &str, patterns: &HashSet<String>) -> bool {
     for pattern in patterns {
         if pattern.starts_with('/') {
-            // Root-only pattern - must match from the beginning of path
-            let root_pattern = &pattern[1..]; // Remove leading slash
+            let root_pattern = &pattern[1..];
             
             if root_pattern.ends_with('/') {
-                // Root directory pattern
                 let dir_name = &root_pattern[..root_pattern.len() - 1];
                 if path == dir_name || path.starts_with(&format!("{}/", dir_name)) {
                     return true;
                 }
             } else {
-                // Root file or directory pattern
                 if path == root_pattern || path.starts_with(&format!("{}/", root_pattern)) {
                     return true;
                 }
             }
         } else if pattern.ends_with('/') {
-            // Directory pattern - matches directory and all its contents anywhere
             let dir_name = &pattern[..pattern.len() - 1];
             
-            // Check if path is the directory itself or inside it
             if path == dir_name || path.starts_with(&format!("{}/", dir_name)) {
                 return true;
             }
             
-            // Check if directory appears as a component anywhere in the path
             let components: Vec<&str> = path.split('/').collect();
             if components.contains(&dir_name) {
                 return true;
             }
         } else if pattern.starts_with("*.") {
-            // Extension pattern - matches files with this extension
-            let ext = &pattern[1..]; // includes the dot
+            let ext = &pattern[1..];
             if path.ends_with(ext) {
                 return true;
             }
         } else if pattern.contains('/') {
-            // Path pattern with slash - must match from root
             if path == pattern || path.starts_with(&format!("{}/", pattern)) {
                 return true;
             }
         } else {
-            // Simple filename/directory pattern - matches as a complete component
             let components: Vec<&str> = path.split('/').collect();
             
-            // Check if pattern matches any complete path component
             if components.contains(&pattern.as_str()) {
                 return true;
             }
             
-            // Also check if it matches the complete path (for single-level files)
             if path == pattern {
                 return true;
             }
@@ -336,7 +359,7 @@ mod tests {
         fs::write(dir_path.join(".gitignore"), "target\n*.tmp").unwrap();
         fs::write(dir_path.join("test.tmp"), "content").unwrap();
 
-        let result = list_relevant_files(dir_path);
+        let result = list_relevant_files(&[dir_path.to_path_buf()]);
 
         assert!(result
             .files
@@ -367,7 +390,7 @@ mod tests {
             fs::write(dir_path.join(&filename), "content").unwrap();
         }
 
-        let result = list_relevant_files(dir_path);
+        let result = list_relevant_files(&[dir_path.to_path_buf()]);
 
         // Should be truncated due to size limit
         assert!(result.truncated);
@@ -381,5 +404,41 @@ mod tests {
         
         // Should be close to but not exceed MAX_OUTPUT_SIZE_BYTES
         assert!(total_size <= MAX_OUTPUT_SIZE_BYTES + 1000); // Some buffer for the last file
+    }
+
+    #[test]
+    fn test_list_relevant_files_multiple_roots() {
+        let temp_dir1 = tempdir().unwrap();
+        let dir_path1 = temp_dir1.path();
+        
+        let temp_dir2 = tempdir().unwrap();
+        let dir_path2 = temp_dir2.path();
+
+        // Create files in first workspace
+        fs::create_dir(dir_path1.join("src")).unwrap();
+        fs::write(dir_path1.join("src/main.rs"), "content").unwrap();
+        fs::write(dir_path1.join("Cargo.toml"), "content").unwrap();
+
+        // Create files in second workspace
+        fs::create_dir(dir_path2.join("lib")).unwrap();
+        fs::write(dir_path2.join("lib/utils.rs"), "content").unwrap();
+        fs::write(dir_path2.join("package.json"), "content").unwrap();
+
+        let result = list_relevant_files(&[
+            dir_path1.to_path_buf(),
+            dir_path2.to_path_buf(),
+        ]);
+
+        // Files should be prefixed with workspace names
+        let files_str: Vec<String> = result.files.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        
+        // Should contain files from both workspaces with workspace prefixes
+        assert!(files_str.iter().any(|p| p.contains("]") && p.contains("main.rs")));
+        assert!(files_str.iter().any(|p| p.contains("]") && p.contains("Cargo.toml")));
+        assert!(files_str.iter().any(|p| p.contains("]") && p.contains("utils.rs")));
+        assert!(files_str.iter().any(|p| p.contains("]") && p.contains("package.json")));
+        
+        // Should have both workspace roots tracked
+        assert_eq!(result.workspace_roots.len(), 2);
     }
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tycode_core::ai::bedrock::BedrockProvider;
@@ -23,27 +24,30 @@ impl BaseApp {
     pub async fn new(
         provider: BedrockProvider,
         _tunings: ModelSettings,
+        workspace_roots: Option<Vec<PathBuf>>,
         settings: Option<Arc<SettingsManager>>,
     ) -> Result<Self> {
-        // Create shared chat state
+        let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
+
         let chat_state = SharedChatState::new();
 
-        // Create actor communication channel
         let (actor_tx, actor_rx) = mpsc::unbounded_channel();
 
-        // Create and spawn the chat actor with settings
-        let actor =
-            ChatActor::with_settings(chat_state.clone(), provider, actor_rx, settings.clone());
+        let actor = ChatActor::new(
+            chat_state.clone(),
+            provider,
+            actor_rx,
+            workspace_roots,
+            settings.clone(),
+        );
 
-        // Use spawn_local for single-threaded execution
+        // spawn_local for single-threaded execution required by tokio LocalSet
         tokio::task::spawn_local(async move {
             actor.run().await;
         });
 
-        // Subscribe to events
         let event_rx = chat_state.subscribe();
 
-        // Create command handler for getting command info
         let command_handler = CommandHandler::new(chat_state.clone());
 
         Ok(Self {

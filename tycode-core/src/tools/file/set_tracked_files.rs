@@ -13,8 +13,8 @@ pub struct SetTrackedFilesTool {
 }
 
 impl SetTrackedFilesTool {
-    pub fn new(workspace_root: PathBuf, chat_state: Arc<SharedChatState>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_root);
+    pub fn new(workspace_roots: Vec<PathBuf>, chat_state: Arc<SharedChatState>) -> Self {
+        let file_manager = FileAccessManager::new(workspace_roots);
         Self {
             file_manager,
             chat_state,

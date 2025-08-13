@@ -4,15 +4,15 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct MessageContext {
-    pub working_directory: PathBuf,
+    pub working_directories: Vec<PathBuf>,
     pub relevant_files: Vec<PathBuf>,
     pub tracked_file_contents: HashMap<PathBuf, String>,
 }
 
 impl MessageContext {
-    pub fn new(working_directory: PathBuf) -> Self {
+    pub fn new(working_directories: Vec<PathBuf>) -> Self {
         Self {
-            working_directory,
+            working_directories,
             relevant_files: Vec::new(),
             tracked_file_contents: HashMap::new(),
         }
@@ -33,10 +33,18 @@ impl MessageContext {
     pub fn to_formatted_string(&self) -> String {
         let mut result = String::new();
 
-        result.push_str(&format!(
-            "Working Directory: {}\n\n",
-            self.working_directory.display()
-        ));
+        if self.working_directories.len() == 1 {
+            result.push_str(&format!(
+                "Working Directory: {}\n\n",
+                self.working_directories[0].display()
+            ));
+        } else {
+            result.push_str("Working Directories:\n");
+            for dir in &self.working_directories {
+                result.push_str(&format!("  {}\n", dir.display()));
+            }
+            result.push('\n');
+        }
 
         if !self.relevant_files.is_empty() {
             result.push_str("Project Files:\n");

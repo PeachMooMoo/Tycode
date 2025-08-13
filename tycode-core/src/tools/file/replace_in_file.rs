@@ -11,8 +11,8 @@ pub struct ReplaceInFileTool {
 }
 
 impl ReplaceInFileTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        let file_manager = FileAccessManager::new(workspace_root.clone());
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
+        let file_manager = FileAccessManager::new(workspace_roots);
         Self { file_manager }
     }
 

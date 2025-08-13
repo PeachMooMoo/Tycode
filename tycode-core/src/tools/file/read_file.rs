@@ -6,26 +6,43 @@ use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct ReadFileTool {
-    workspace_root: PathBuf,
+    workspace_roots: Vec<PathBuf>,
     file_manager: FileAccessManager,
 }
 
 impl ReadFileTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        let file_manager = FileAccessManager::new(workspace_root.clone());
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
+        let file_manager = FileAccessManager::new(workspace_roots.clone());
         Self {
-            workspace_root,
+            workspace_roots,
             file_manager,
         }
     }
 
-    /// Constructs the path to the index file for the given file path
-    fn get_index_path(&self, file_path: &str) -> PathBuf {
-        let index_base = self.workspace_root.join(".tycode").join("index");
-
-        // Add .md extension to the file path for the index
-        let index_file = format!("{}.md", file_path);
-        index_base.join(index_file)
+    /// Looks for index file in the workspace root that contains the file
+    fn find_index_path(&self, file_path: &str) -> Option<PathBuf> {
+        let path = std::path::Path::new(file_path);
+        
+        // Try to find which workspace root contains this file
+        for workspace_root in &self.workspace_roots {
+            let full_path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace_root.join(path)
+            };
+            
+            if full_path.starts_with(workspace_root) || full_path.exists() {
+                let index_base = workspace_root.join(".tycode").join("index");
+                let index_file = format!("{}.md", file_path);
+                let index_path = index_base.join(index_file);
+                
+                if index_path.exists() {
+                    return Some(index_path);
+                }
+            }
+        }
+        
+        None
     }
 }
 
@@ -68,52 +85,31 @@ impl ToolExecutor for ReadFileTool {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: summary"))?;
 
         if summary {
-            // Try to read from the index
-            let index_path = self.get_index_path(file_path);
-            let index_path_str = index_path
-                .strip_prefix(&self.workspace_root)
-                .unwrap_or(&index_path)
-                .to_string_lossy()
-                .to_string();
-
-            if self
-                .file_manager
-                .file_exists(&index_path_str)
-                .await
-                .unwrap_or(false)
-            {
-                // Read the summary from the index
-                let summary_content = self.file_manager.read_file(&index_path_str).await?;
-
-                return Ok(json!({
-                    "content": summary_content,
-                    "size": summary_content.len(),
-                    "path": file_path,
-                    "is_summary": true
-                }));
+            if let Some(index_path) = self.find_index_path(file_path) {
+                // Try to read the index file
+                let index_path_str = index_path.to_string_lossy().to_string();
+                if let Ok(summary_content) = self.file_manager.read_file(&index_path_str).await {
+                    return Ok(json!({
+                        "content": summary_content,
+                        "size": summary_content.len(),
+                        "path": file_path,
+                        "is_summary": true
+                    }));
+                }
             }
-
-            // Fall back to full file if no index exists
+            
+            // No index found
+            return Err(anyhow::anyhow!("No summary index found for: {}", file_path));
         }
 
-        // Check if the path is a directory (for non-summary requests)
-        // Try to list directory to check if it's a directory
+        // Check if the path is a directory
         if self
             .file_manager
-            .list_directory(Some(file_path))
+            .list_directory(file_path)
             .await
             .is_ok()
         {
-            // It's a directory
-            if !summary {
-                return Err(anyhow::anyhow!("Path is a directory, not a file: {}. Use summary=true to get directory summary if available.", file_path));
-            } else {
-                // No summary was found for this directory
-                return Err(anyhow::anyhow!(
-                    "No summary found for directory: {}",
-                    file_path
-                ));
-            }
+            return Err(anyhow::anyhow!("Path is a directory, not a file: {}", file_path));
         }
 
         // Read the full file

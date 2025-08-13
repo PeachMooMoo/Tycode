@@ -56,6 +56,10 @@ struct Args {
     /// Run in subprocess mode for VSCode extension
     #[arg(long)]
     subprocess: bool,
+
+    /// Workspace roots (for multi-root workspaces)
+    #[arg(long, value_delimiter = ',')]
+    workspace_roots: Option<Vec<String>>,
 }
 
 fn main() -> Result<()> {
@@ -150,14 +154,22 @@ async fn async_main() -> Result<()> {
         return Err(anyhow::anyhow!("Invalid model tunings: {}", e));
     }
 
+    let workspace_roots = args.workspace_roots.map(|roots| -> Result<Vec<std::path::PathBuf>> {
+        roots.into_iter().map(|root| {
+            let path = std::path::PathBuf::from(root);
+            path.canonicalize()
+                .map_err(|e| anyhow::anyhow!("Failed to canonicalize workspace root {:?}: {}", path, e))
+        }).collect()
+    }).transpose()?;
+
     // Create and run the appropriate app based on mode
     if args.subprocess {
         // Run in subprocess mode for VSCode extension
-        let mut app = SubprocessApp::new(provider, tunings, settings).await?;
+        let mut app = SubprocessApp::new(provider, tunings, workspace_roots, settings).await?;
         app.run().await?;
     } else {
         // Run in interactive mode
-        let mut app = InteractiveApp::new(provider, tunings, settings).await?;
+        let mut app = InteractiveApp::new(provider, tunings, workspace_roots, settings).await?;
         app.run().await?;
     }
 

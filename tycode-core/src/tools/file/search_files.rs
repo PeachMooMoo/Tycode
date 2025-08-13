@@ -6,15 +6,15 @@ use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct SearchFilesTool {
-    workspace_root: PathBuf,
+    workspace_roots: Vec<PathBuf>,
     file_manager: FileAccessManager,
 }
 
 impl SearchFilesTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        let file_manager = FileAccessManager::new(workspace_root.clone());
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
+        let file_manager = FileAccessManager::new(workspace_roots.clone());
         Self {
-            workspace_root,
+            workspace_roots,
             file_manager,
         }
     }
@@ -72,12 +72,15 @@ impl ToolExecutor for SearchFilesTool {
 
         let mut json_results = Vec::new();
         for result in results {
-            let relative_path = result
-                .path
-                .strip_prefix(&self.workspace_root)
-                .unwrap_or(&result.path)
-                .to_string_lossy()
-                .to_string();
+            // Find which workspace root this path belongs to
+            let relative_path = self.workspace_roots.iter()
+                .find_map(|root| {
+                    result.path
+                        .strip_prefix(root)
+                        .ok()
+                        .map(|rel| rel.to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| result.path.to_string_lossy().to_string());
 
             json_results.push(json!({
                 "path": relative_path,

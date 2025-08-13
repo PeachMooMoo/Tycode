@@ -97,11 +97,11 @@ impl CommandHandler {
         let working_dir = PathBuf::from(".");
 
         // Get relevant files (directory listing)
-        let relevant = list_relevant_files(&working_dir);
+        let relevant = list_relevant_files(&[working_dir.clone()]);
 
         // Get tracked files
         let tracked_files = self.state.get_tracked_files();
-        let file_manager = FileAccessManager::new(working_dir.clone());
+        let file_manager = FileAccessManager::new(vec![working_dir.clone()]);
 
         let mut message = String::new();
         message.push_str("=== AI Context Debug Info ===\n\n");

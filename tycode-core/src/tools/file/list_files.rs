@@ -6,15 +6,15 @@ use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct ListFilesTool {
-    workspace_root: PathBuf,
+    workspace_roots: Vec<PathBuf>,
     file_manager: FileAccessManager,
 }
 
 impl ListFilesTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
-        let file_manager = FileAccessManager::new(workspace_root.clone());
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
+        let file_manager = FileAccessManager::new(workspace_roots.clone());
         Self {
-            workspace_root,
+            workspace_roots,
             file_manager,
         }
     }
@@ -46,37 +46,70 @@ impl ToolExecutor for ListFilesTool {
     async fn execute(&self, arguments: &Value) -> Result<Value> {
         let directory_path = arguments.get("directory_path").and_then(|v| v.as_str());
 
-        // Use FileAccessManager for secure directory listing
-        let paths = self.file_manager.list_directory(directory_path).await?;
+        let mut all_entries = Vec::new();
+        let display_path;
 
-        let mut entries = Vec::new();
-        for path in paths {
-            let relative_path = path
-                .strip_prefix(&self.workspace_root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
+        if let Some(dir_path) = directory_path {
+            // List specific directory
+            let paths = self.file_manager.list_directory(dir_path).await?;
+            display_path = dir_path.to_string();
 
-            // Check if it's a directory by trying to list it
-            let relative_str = path
-                .strip_prefix(&self.workspace_root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-            let is_dir = self
-                .file_manager
-                .list_directory(Some(&relative_str))
-                .await
-                .is_ok();
+            for path in paths {
+                let relative_path = self.workspace_roots.iter()
+                    .find_map(|root| {
+                        path.strip_prefix(root)
+                            .ok()
+                            .map(|rel| rel.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
 
-            entries.push(json!({
-                "name": path.file_name().unwrap_or_default().to_string_lossy(),
-                "path": relative_path,
-                "type": if is_dir { "directory" } else { "file" },
-            }));
+                let is_dir = self
+                    .file_manager
+                    .list_directory(&relative_path)
+                    .await
+                    .is_ok();
+
+                all_entries.push(json!({
+                    "name": path.file_name().unwrap_or_default().to_string_lossy(),
+                    "path": relative_path,
+                    "type": if is_dir { "directory" } else { "file" },
+                }));
+            }
+        } else {
+            // No directory specified - list all workspace roots
+            display_path = if self.workspace_roots.len() == 1 {
+                self.workspace_roots[0].to_string_lossy().to_string()
+            } else {
+                "all workspace roots".to_string()
+            };
+
+            for root in &self.workspace_roots {
+                let root_str = root.to_string_lossy().to_string();
+                let paths = self.file_manager.list_directory(&root_str).await?;
+                
+                for path in paths {
+                    let relative_path = path.strip_prefix(root)
+                        .ok()
+                        .map(|rel| rel.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+                    let is_dir = self
+                        .file_manager
+                        .list_directory(&relative_path)
+                        .await
+                        .is_ok();
+
+                    all_entries.push(json!({
+                        "name": path.file_name().unwrap_or_default().to_string_lossy(),
+                        "path": relative_path,
+                        "type": if is_dir { "directory" } else { "file" },
+                        "workspace": root.file_name().unwrap_or_default().to_string_lossy(),
+                    }));
+                }
+            }
         }
 
-        entries.sort_by(|a, b| {
+        all_entries.sort_by(|a, b| {
             let a_type = a["type"].as_str().unwrap_or("");
             let b_type = b["type"].as_str().unwrap_or("");
             let a_name = a["name"].as_str().unwrap_or("");
@@ -90,8 +123,8 @@ impl ToolExecutor for ListFilesTool {
         });
 
         Ok(json!({
-            "entries": entries,
-            "path": directory_path.unwrap_or("."),
+            "entries": all_entries,
+            "path": display_path,
         }))
     }
 }

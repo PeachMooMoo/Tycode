@@ -36,6 +36,7 @@ pub struct ChatActor {
     rx: mpsc::UnboundedReceiver<ChatActorMessage>,
     command_handler: CommandHandler,
     settings: Option<Arc<SettingsManager>>,
+    workspace_roots: Vec<PathBuf>,
 }
 
 impl ChatActor {
@@ -43,19 +44,11 @@ impl ChatActor {
         state: SharedChatState,
         provider: BedrockProvider,
         rx: mpsc::UnboundedReceiver<ChatActorMessage>,
-    ) -> Self {
-        Self::with_settings(state, provider, rx, None)
-    }
-
-    pub fn with_settings(
-        state: SharedChatState,
-        provider: BedrockProvider,
-        rx: mpsc::UnboundedReceiver<ChatActorMessage>,
+        workspace_roots: Vec<PathBuf>,
         settings: Option<Arc<SettingsManager>>,
     ) -> Self {
         let command_handler = CommandHandler::new(state.clone());
 
-        // Initialize with software engineer agent
         let mut agent_stack = Vec::new();
         agent_stack.push(ActiveAgent::new(Box::new(SoftwareEngineerAgent)));
 
@@ -66,6 +59,7 @@ impl ChatActor {
             rx,
             command_handler,
             settings,
+            workspace_roots,
         }
     }
 
@@ -163,16 +157,13 @@ impl ChatActor {
     }
 
     async fn build_message_context(&self) -> MessageContext {
-        let working_dir = PathBuf::from(".");
-        let mut context = MessageContext::new(working_dir.clone());
+        let mut context = MessageContext::new(self.workspace_roots.clone());
 
-        // Get relevant files from the directory
-        let relevant_files = list_relevant_files(&working_dir);
+        let relevant_files = list_relevant_files(&self.workspace_roots);
         context.set_relevant_files(relevant_files.files);
 
-        // Load content of tracked files
         let tracked_files = self.state.get_tracked_files();
-        let file_manager = FileAccessManager::new(working_dir);
+        let file_manager = FileAccessManager::new(self.workspace_roots.clone());
 
         for file_path in tracked_files {
             let path_str = file_path.to_string_lossy();
@@ -198,32 +189,27 @@ impl ChatActor {
                 current.agent.available_tools().into_iter().collect();
 
             let file_modification_api = self.state.get_file_modification_api();
-            let tool_registry = ToolRegistry::with_chat_state(
-                ".".into(),
+            let tool_registry = ToolRegistry::new(
+                self.workspace_roots.clone(),
                 file_modification_api,
                 Some(Arc::new(self.state.clone())),
             );
 
-            // Get tool definitions for the agent's allowed tool types
             let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
             let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
-            // Build message context with tracked files
             let message_context = self.build_message_context().await;
 
-            // Build messages for the request WITHOUT modifying the stored conversation
             let mut messages_for_request = Vec::new();
 
             let context_string = message_context.to_formatted_string();
 
-            // Calculate directory list size (from relevant_files)
             let dir_list_size = message_context
                 .relevant_files
                 .iter()
-                .map(|p| p.to_string_lossy().len() + 1) // +1 for newline
+                .map(|p| p.to_string_lossy().len() + 1)
                 .sum::<usize>();
 
-            // Calculate file sizes
             let files: Vec<FileInfo> = message_context
                 .tracked_file_contents
                 .iter()
@@ -238,17 +224,14 @@ impl ChatActor {
                 files,
             });
 
-            // Add context as the first message (not stored in conversation history)
             let context_message = Message {
                 role: MessageRole::User,
                 content: Content::text_only(format!("Current Context:\n{}", context_string)),
             };
             messages_for_request.push(context_message);
 
-            // Add the actual conversation history
             messages_for_request.extend(self.current_agent().conversation.clone());
 
-            // Determine which model settings to use and track the source
             let (model_settings, model_source) = self.determine_model_settings_and_source(current);
 
             let system_prompt = current.agent.system_prompt().to_string();
@@ -303,7 +286,6 @@ impl ChatActor {
                         for tool_use in &tool_calls {
                             let result = tool_registry.execute_tool(tool_use).await;
 
-                            // Log tool results if trace is enabled
                             info!(
                                 tool_name = %tool_use.name,
                                 ?result,
@@ -359,7 +341,6 @@ impl ChatActor {
     ) -> (ModelSettings, ModelSource) {
         let agent_name = agent.agent.name();
 
-        // First check if user has configured settings for this agent
         if let Some(settings) = &self.settings {
             if let Some(agent_settings) = settings.settings().get_agent_settings(agent_name) {
                 return (
@@ -375,7 +356,6 @@ impl ChatActor {
             }
         }
 
-        // Otherwise use agent's preferred model settings
         (agent.agent.preferred_model(), ModelSource::AgentPreference)
     }
 }
