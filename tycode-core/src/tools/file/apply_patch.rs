@@ -122,10 +122,10 @@ impl ToolExecutor for ApplyPatchTool {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: patch"))?;
 
         // Read the current content using FileAccessManager
-        let content = self.file_manager.read_file(file_path).await?;
+        let original_content = self.file_manager.read_file(file_path).await?;
 
         // Apply the patch
-        let patched_content = self.apply_patch(&content, patch)?;
+        let patched_content = self.apply_patch(&original_content, patch)?;
 
         // Write the patched content back using FileAccessManager
         self.file_manager
@@ -135,7 +135,9 @@ impl ToolExecutor for ApplyPatchTool {
         Ok(json!({
             "success": true,
             "path": file_path,
-            "message": "Patch applied successfully"
+            "message": "Patch applied successfully",
+            "original_content": original_content,
+            "new_content": patched_content
         }))
     }
 }

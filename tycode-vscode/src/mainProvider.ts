@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConversationManager } from './conversationManager';
 import { Conversation, ConversationMessage } from './conversation';
+import * as path from 'path';
 
 // Import build info - will be generated at build time
 let buildInfo = { buildTime: 'dev', timestamp: new Date().toISOString() };
@@ -11,9 +12,16 @@ try {
     // Build info not available in dev mode
 }
 
+interface DiffData {
+    filePath: string;
+    originalContent: string;
+    newContent: string;
+}
+
 export class MainProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private conversationManager: ConversationManager;
+    private _diffDataStore: Map<string, DiffData> = new Map();
 
     constructor(
         private readonly context: vscode.ExtensionContext
@@ -34,14 +42,35 @@ export class MainProvider implements vscode.WebviewViewProvider {
         this.conversationManager.on('conversationUpdate', (id: string, updateType: string, message: ConversationMessage) => {
             // Handle tool results separately
             if (updateType === 'toolResult') {
-                console.log('[MainProvider] Forwarding toolResult to webview:', id, message);
+                console.log('[MainProvider] Processing toolResult:', id, message);
+                
+                // Check if this is a file modification with diff data
+                let diffId: string | undefined;
+                const toolMessage = message as any;
+                if (toolMessage.success && toolMessage.result) {
+                    const toolName = toolMessage.tool_name;
+                    if ((toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') &&
+                        toolMessage.result.original_content !== undefined &&
+                        toolMessage.result.new_content !== undefined) {
+                        
+                        diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                        console.log('[MainProvider] Storing diff with ID:', diffId);
+                        this._diffDataStore.set(diffId, {
+                            filePath: toolMessage.result.path,
+                            originalContent: toolMessage.result.original_content,
+                            newContent: toolMessage.result.new_content
+                        });
+                    }
+                }
+                
                 this.sendToWebview({
                     type: 'toolResult',
                     conversationId: id,
-                    toolName: (message as any).tool_name,
-                    success: (message as any).success,
-                    result: (message as any).result,
-                    error: (message as any).error
+                    toolName: toolMessage.tool_name,
+                    success: toolMessage.success,
+                    result: toolMessage.result,
+                    error: toolMessage.error,
+                    diffId: diffId
                 });
                 return;
             }
@@ -113,6 +142,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
         // Handle messages from the webview
         webviewView.webview.onDidReceiveMessage(async data => {
+            console.log('[MainProvider] Received message from webview:', data);
             switch (data.type) {
                 case 'newChat':
                     await this.handleNewChat();
@@ -141,6 +171,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'insertCode':
                     await this.insertCodeInEditor(data.code);
+                    break;
+                case 'viewDiff':
+                    await this.showDiff(data.diffId);
                     break;
             }
         });
@@ -245,6 +278,76 @@ export class MainProvider implements vscode.WebviewViewProvider {
         await editor.edit(editBuilder => {
             editBuilder.insert(position, code);
         });
+    }
+
+    private async showDiff(diffId: string): Promise<void> {
+        console.log('[MainProvider] showDiff called with diffId:', diffId);
+        const diffData = this._diffDataStore.get(diffId);
+        if (!diffData) {
+            console.error('[MainProvider] Diff data not found for diffId:', diffId);
+            vscode.window.showWarningMessage('Diff data not found');
+            return;
+        }
+        
+        console.log('[MainProvider] Diff data found:', {
+            filePath: diffData.filePath,
+            originalLength: diffData.originalContent?.length,
+            newLength: diffData.newContent?.length
+        });
+
+        // Create URIs for the diff - use :// to properly set authority
+        const originalUri = vscode.Uri.parse(`tycode-diff://before/${diffData.filePath}?${diffId}`);
+        const modifiedUri = vscode.Uri.parse(`tycode-diff://after/${diffData.filePath}?${diffId}`);
+
+        // Register a text document content provider for the diff
+        const provider = new class implements vscode.TextDocumentContentProvider {
+            constructor(private data: DiffData) {}
+            
+            provideTextDocumentContent(uri: vscode.Uri): string {
+                console.log('[MainProvider] provideTextDocumentContent called');
+                console.log('[MainProvider] URI scheme:', uri.scheme);
+                console.log('[MainProvider] URI authority:', uri.authority);
+                console.log('[MainProvider] URI path:', uri.path);
+                console.log('[MainProvider] Full URI:', uri.toString());
+                
+                if (uri.scheme === 'tycode-diff') {
+                    if (uri.authority === 'before') {
+                        console.log('[MainProvider] Returning original content, length:', this.data.originalContent?.length);
+                        return this.data.originalContent;
+                    } else if (uri.authority === 'after') {
+                        console.log('[MainProvider] Returning new content, length:', this.data.newContent?.length);
+                        return this.data.newContent;
+                    }
+                }
+                console.log('[MainProvider] No content match for URI');
+                return '';
+            }
+        }(diffData);
+
+        // Register the provider temporarily
+        const disposable = vscode.workspace.registerTextDocumentContentProvider('tycode-diff', provider);
+
+        try {
+            // Open the diff editor
+            const title = `Changes to ${path.basename(diffData.filePath)}`;
+            console.log('[MainProvider] Opening diff editor with title:', title);
+            await vscode.commands.executeCommand(
+                'vscode.diff',
+                originalUri,
+                modifiedUri,
+                title,
+                { preview: true }
+            );
+        } catch (error) {
+            console.error('[MainProvider] Error opening diff editor:', error);
+            vscode.window.showErrorMessage('Failed to open diff: ' + (error as Error).message);
+        }
+
+        // Clean up after a delay (keep it alive for a while in case user switches tabs)
+        setTimeout(() => {
+            console.log('[MainProvider] Disposing diff provider for:', diffId);
+            disposable.dispose();
+        }, 300000); // 5 minutes
     }
 
     private sendToWebview(message: any): void {

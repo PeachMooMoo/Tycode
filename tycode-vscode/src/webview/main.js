@@ -459,7 +459,7 @@
     function handleToolResult(message) {
         console.log('Tool result received:', message);
         
-        const { conversationId, toolName, success, result, error } = message;
+        const { conversationId, toolName, success, result, error, diffId } = message;
         
         // Find the most recent tool call item with this name in the specified conversation
         const conversationView = document.querySelector(`.conversation-view[data-conversation-id="${conversationId}"]`);
@@ -502,12 +502,19 @@
                 resultContent = `<div class="tool-error-message">${escapeHtml(error)}</div>`;
             } else if (result) {
                 // Special formatting for different tool types
-                if (toolName === 'write_file' || toolName === 'replace_in_file') {
-                    // File modification tools
+                if (toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') {
+                    // File modification tools  
                     if (result.path) {
                         resultContent = `<div class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</div>`;
                         if (result.changes_applied !== undefined) {
                             resultContent += `<div class="tool-detail">Changes applied: ${result.changes_applied}</div>`;
+                        }
+                        // Add View Diff button if diffId is available
+                        if (diffId) {
+                            console.log('[Main] Adding diff button with ID:', diffId);
+                            resultContent += `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>`;
+                        } else {
+                            console.log('[Main] No diffId available for file modification');
                         }
                     } else {
                         resultContent = `<div class="tool-success-message">✓ File operation completed</div>`;
@@ -750,4 +757,26 @@
 
         document.body.appendChild(menu);
     }
+
+    // Handle View Diff button clicks using event delegation
+    document.addEventListener('click', (e) => {
+        if (e.target && e.target.classList && e.target.classList.contains('view-diff-button')) {
+            const diffId = e.target.getAttribute('data-diff-id');
+            console.log('[Main] View diff clicked, diffId:', diffId);
+            if (diffId) {
+                const message = {
+                    type: 'viewDiff',
+                    diffId: diffId
+                };
+                console.log('[Main] Sending message:', message);
+                console.log('[Main] vscode object exists?', typeof vscode !== 'undefined');
+                try {
+                    vscode.postMessage(message);
+                    console.log('[Main] Message sent successfully');
+                } catch (error) {
+                    console.error('[Main] Error sending message:', error);
+                }
+            }
+        }
+    });
 })();

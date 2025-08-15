@@ -2,11 +2,18 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { SubprocessBridge } from './subprocessBridge';
 
+interface DiffData {
+    filePath: string;
+    originalContent: string;
+    newContent: string;
+}
+
 export class ChatProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
     private _bridge: SubprocessBridge;
     private _messageHistory: Array<{ role: string; content: string }> = [];
+    private _diffDataStore: Map<string, DiffData> = new Map();
 
     constructor(
         private readonly _context: vscode.ExtensionContext,
@@ -40,13 +47,34 @@ export class ChatProvider implements vscode.WebviewViewProvider {
 
         this._bridge.on('toolResult', (result: any) => {
             console.log('[ChatProvider] Received toolResult event:', result);
+            
+            // Store diff data if available for file modification tools
+            if (result.success && result.result) {
+                const toolName = result.tool_name;
+                if ((toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') &&
+                    result.result.original_content !== undefined && 
+                    result.result.new_content !== undefined) {
+                    
+                    const diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    this._diffDataStore.set(diffId, {
+                        filePath: result.result.path,
+                        originalContent: result.result.original_content,
+                        newContent: result.result.new_content
+                    });
+                    
+                    // Add diffId to result for the webview
+                    result.diffId = diffId;
+                }
+            }
+            
             if (this._view) {
                 const message = {
                     type: 'toolResult',
                     toolName: result.tool_name,
                     success: result.success,
                     result: result.result,
-                    error: result.error
+                    error: result.error,
+                    diffId: result.diffId
                 };
                 console.log('[ChatProvider] Posting to webview:', message);
                 this._view.webview.postMessage(message);
@@ -124,6 +152,9 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                 case 'insertCode':
                     await this.insertCodeInEditor(data.code);
                     break;
+                case 'viewDiff':
+                    await this.showDiff(data.diffId);
+                    break;
             }
         });
     }
@@ -188,6 +219,52 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         await editor.edit(editBuilder => {
             editBuilder.insert(position, code);
         });
+    }
+
+    private async showDiff(diffId: string) {
+        const diffData = this._diffDataStore.get(diffId);
+        if (!diffData) {
+            vscode.window.showWarningMessage('Diff data not found');
+            return;
+        }
+
+        // Create URIs for the diff
+        const originalUri = vscode.Uri.parse(`tycode-diff:before/${diffData.filePath}?${diffId}`);
+        const modifiedUri = vscode.Uri.parse(`tycode-diff:after/${diffData.filePath}?${diffId}`);
+
+        // Register a text document content provider for the diff
+        const provider = new class implements vscode.TextDocumentContentProvider {
+            constructor(private data: DiffData) {}
+            
+            provideTextDocumentContent(uri: vscode.Uri): string {
+                if (uri.scheme === 'tycode-diff') {
+                    if (uri.authority === 'before') {
+                        return this.data.originalContent;
+                    } else if (uri.authority === 'after') {
+                        return this.data.newContent;
+                    }
+                }
+                return '';
+            }
+        }(diffData);
+
+        // Register the provider temporarily
+        const disposable = vscode.workspace.registerTextDocumentContentProvider('tycode-diff', provider);
+
+        // Open the diff editor
+        const title = `Changes to ${path.basename(diffData.filePath)}`;
+        await vscode.commands.executeCommand(
+            'vscode.diff',
+            originalUri,
+            modifiedUri,
+            title,
+            { preview: true }
+        );
+
+        // Clean up after a delay (keep it alive for a while in case user switches tabs)
+        setTimeout(() => {
+            disposable.dispose();
+        }, 300000); // 5 minutes
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {

@@ -201,8 +201,8 @@
         }
     }
 
-    function displayToolResult(toolName, success, result, error) {
-        console.log('Tool result received:', { toolName, success, result, error });
+    function displayToolResult(toolName, success, result, error, diffId) {
+        console.log('Tool result received:', { toolName, success, result, error, diffId });
         
         // Find the most recent tool call item with this name
         const toolItems = document.querySelectorAll(`.tool-call-item[data-tool-name="${toolName}"]`);
@@ -239,12 +239,16 @@
                 resultContent = `<div class="tool-error-message">${escapeHtml(error)}</div>`;
             } else if (result) {
                 // Special formatting for different tool types
-                if (toolName === 'write_file' || toolName === 'replace_in_file') {
+                if (toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') {
                     // File modification tools
                     if (result.path) {
                         resultContent = `<div class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</div>`;
                         if (result.changes_applied !== undefined) {
                             resultContent += `<div class="tool-detail">Changes applied: ${result.changes_applied}</div>`;
+                        }
+                        // Add View Diff button if diffId is available
+                        if (diffId) {
+                            resultContent += `<button class="view-diff-button" onclick="viewDiff('${diffId}')">📝 View Diff</button>`;
                         }
                     } else {
                         resultContent = `<div class="tool-success-message">✓ File operation completed</div>`;
@@ -284,6 +288,14 @@
         
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
+
+    // Add global function to handle View Diff button clicks
+    window.viewDiff = function(diffId) {
+        vscode.postMessage({
+            type: 'viewDiff',
+            diffId: diffId
+        });
+    };
 
     function renderContent(content) {
         // Escape HTML first
@@ -398,7 +410,8 @@
                     message.toolName,
                     message.success,
                     message.result,
-                    message.error
+                    message.error,
+                    message.diffId
                 );
                 break;
             case 'showTyping':

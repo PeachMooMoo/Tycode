@@ -54,13 +54,18 @@ impl ToolExecutor for WriteFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;
 
+        // Try to read original content if file exists
+        let original_content = self.file_manager.read_file(file_path).await.unwrap_or_default();
+
         // Use FileAccessManager for secure file writing
         self.file_manager.write_file(file_path, content).await?;
 
         Ok(json!({
             "success": true,
             "path": file_path,
-            "bytes_written": content.len()
+            "bytes_written": content.len(),
+            "original_content": original_content,
+            "new_content": content
         }))
     }
 }

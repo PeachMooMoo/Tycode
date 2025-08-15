@@ -113,11 +113,11 @@ impl ToolExecutor for ReplaceInFileTool {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff"))?;
 
         // Read the current content using FileAccessManager
-        let content = self.file_manager.read_file(file_path).await?;
+        let original_content = self.file_manager.read_file(file_path).await?;
 
         // Parse and apply the diff
         let replacements = self.parse_diff(diff)?;
-        let new_content = self.apply_replacements(&content, replacements)?;
+        let new_content = self.apply_replacements(&original_content, replacements)?;
 
         // Write the modified content back using FileAccessManager
         self.file_manager
@@ -127,7 +127,9 @@ impl ToolExecutor for ReplaceInFileTool {
         Ok(json!({
             "success": true,
             "path": file_path,
-            "changes_applied": true
+            "changes_applied": true,
+            "original_content": original_content,
+            "new_content": new_content
         }))
     }
 }
