@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -101,7 +101,7 @@ impl ToolExecutor for ReplaceInFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
@@ -117,6 +117,7 @@ impl ToolExecutor for ReplaceInFileTool {
 
         // Parse and apply the diff
         let replacements = self.parse_diff(diff)?;
+        let replacement_count = replacements.len();
         let new_content = self.apply_replacements(&original_content, replacements)?;
 
         // Write the modified content back using FileAccessManager
@@ -124,13 +125,22 @@ impl ToolExecutor for ReplaceInFileTool {
             .write_file(file_path, &new_content)
             .await?;
 
-        Ok(json!({
+        // Context data: minimal information for the conversation
+        let context_data = json!({
             "success": true,
             "path": file_path,
             "changes_applied": true,
+            "replacements_made": replacement_count
+        });
+
+        // UI data: full content for diff display in VSCode
+        let ui_data = json!({
+            "path": file_path,
             "original_content": original_content,
             "new_content": new_content
-        }))
+        });
+
+        Ok(ToolResult::with_ui(context_data, ui_data))
     }
 }
 
@@ -172,7 +182,7 @@ See you later
             .await
             .unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result.context_data["success"], true);
 
         // Verify the content was changed
         let new_content = file_manager.read_file("test.txt").await.unwrap();

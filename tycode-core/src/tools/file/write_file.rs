@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -43,7 +43,7 @@ impl ToolExecutor for WriteFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
@@ -56,16 +56,27 @@ impl ToolExecutor for WriteFileTool {
 
         // Try to read original content if file exists
         let original_content = self.file_manager.read_file(file_path).await.unwrap_or_default();
+        let file_exists = !original_content.is_empty();
 
         // Use FileAccessManager for secure file writing
         self.file_manager.write_file(file_path, content).await?;
 
-        Ok(json!({
+        // Context data: minimal information for the conversation
+        let context_data = json!({
             "success": true,
             "path": file_path,
             "bytes_written": content.len(),
+            "created": !file_exists,
+            "updated": file_exists
+        });
+
+        // UI data: full content for diff display in VSCode
+        let ui_data = json!({
+            "path": file_path,
             "original_content": original_content,
             "new_content": content
-        }))
+        });
+
+        Ok(ToolResult::with_ui(context_data, ui_data))
     }
 }

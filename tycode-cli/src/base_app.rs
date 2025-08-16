@@ -2,13 +2,10 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tycode_core::ai::bedrock::BedrockProvider;
+use tycode_core::ai::provider::AiProvider;
 use tycode_core::ai::types::ModelSettings;
 use tycode_core::chat::{
-    actor::ChatActor,
-    commands::CommandHandler,
-    events::ChatEvent,
-    state::SharedChatState,
+    actor::ChatActor, commands::CommandHandler, events::ChatEvent, state::SharedChatState,
 };
 use tycode_core::settings::SettingsManager;
 
@@ -22,7 +19,7 @@ pub struct BaseApp {
 
 impl BaseApp {
     pub async fn new(
-        provider: BedrockProvider,
+        provider: Box<dyn AiProvider>,
         _tunings: ModelSettings,
         workspace_roots: Option<Vec<PathBuf>>,
         settings: Option<Arc<SettingsManager>>,

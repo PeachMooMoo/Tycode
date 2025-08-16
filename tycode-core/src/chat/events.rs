@@ -15,10 +15,17 @@ pub enum ChatEvent {
         tool_name: String,
         success: bool,
         result: Option<serde_json::Value>,
+        ui_data: Option<serde_json::Value>,
         error: Option<String>,
     },
     OperationCancelled {
         message: String,
+    },
+    RetryAttempt {
+        attempt: u32,
+        max_retries: u32,
+        error: String,
+        backoff_ms: u64,
     },
     Error(String),
 }

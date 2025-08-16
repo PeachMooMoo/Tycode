@@ -3,8 +3,8 @@ use crate::subprocess::SubprocessMessage;
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
-use tycode_core::ai::bedrock::BedrockProvider;
 use tycode_core::ai::types::ModelSettings;
+use tycode_core::ai::AiProvider;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::settings::SettingsManager;
 
@@ -14,7 +14,7 @@ pub struct SubprocessApp {
 
 impl SubprocessApp {
     pub async fn new(
-        provider: BedrockProvider,
+        provider: Box<dyn AiProvider>,
         tunings: ModelSettings,
         workspace_roots: Option<Vec<std::path::PathBuf>>,
         settings: Option<Arc<SettingsManager>>,
@@ -177,30 +177,77 @@ impl SubprocessApp {
                 tool_name,
                 success,
                 result,
+                ui_data,
                 error,
             } => {
-                eprintln!("subprocess_app: Received ToolExecutionCompleted event: tool={}, success={}", tool_name, success);
+                eprintln!(
+                    "subprocess_app: Received ToolExecutionCompleted event: tool={}, success={}",
+                    tool_name, success
+                );
+                // Merge UI data into result if present
+                let combined_result = if let Some(ui) = ui_data {
+                    // If we have both result and ui_data, merge them
+                    if let Some(mut res) = result {
+                        if let serde_json::Value::Object(ref mut res_map) = res {
+                            if let serde_json::Value::Object(ui_map) = ui {
+                                // Add ui_data fields to result
+                                for (key, value) in ui_map {
+                                    res_map.insert(key, value);
+                                }
+                            }
+                        }
+                        Some(res)
+                    } else {
+                        // If only ui_data, use it as the result
+                        Some(ui)
+                    }
+                } else {
+                    // No ui_data, just use result as-is
+                    result
+                };
                 Some(SubprocessMessage::ToolResult {
                     tool_name,
                     success,
-                    result,
+                    result: combined_result,
                     error,
                 })
-            },
+            }
             ChatEvent::TypingStatusChanged(_) => None, // Ignore typing status - not useful
             ChatEvent::OperationCancelled { message } => Some(SubprocessMessage::Event {
                 event: "cancelled".to_string(),
                 data: serde_json::json!({ "message": message }),
+            }),
+            ChatEvent::RetryAttempt {
+                attempt,
+                max_retries,
+                error,
+                backoff_ms,
+            } => Some(SubprocessMessage::Event {
+                event: "retry_attempt".to_string(),
+                data: serde_json::json!({
+                    "attempt": attempt,
+                    "max_retries": max_retries,
+                    "error": error,
+                    "backoff_ms": backoff_ms,
+                }),
             }),
             _ => None,
         };
 
         if let Some(msg) = message {
             // Log what we're about to send
-            if let SubprocessMessage::ToolResult { ref tool_name, ref success, .. } = msg {
-                eprintln!("subprocess_app: Sending ToolResult to stdout: tool={}, success={}", tool_name, success);
+            if let SubprocessMessage::ToolResult {
+                ref tool_name,
+                ref success,
+                ..
+            } = msg
+            {
+                eprintln!(
+                    "subprocess_app: Sending ToolResult to stdout: tool={}, success={}",
+                    tool_name, success
+                );
             }
-            
+
             let json = serde_json::to_string(&msg)?;
             println!("{}", json);
             std::io::stdout().flush()?;

@@ -1,13 +1,16 @@
 use crate::agents::{ActiveAgent, SoftwareEngineerAgent, ToolType};
+use crate::ai::{error::AiError, ContentBlock, ModelSettings};
 use crate::ai::{
-    bedrock::BedrockProvider,
     provider::AiProvider,
-    types::{Content, ConversationRequest, Message, MessageContext, MessageRole},
+    types::{
+        Content, ConversationRequest, ConversationResponse, Message, MessageContext, MessageRole,
+    },
 };
-use crate::ai::{ContentBlock, ModelSettings};
 use crate::chat::{
     commands::CommandHandler,
-    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource},
+    events::{
+        ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource,
+    },
     state::SharedChatState,
 };
 use crate::settings::SettingsManager;
@@ -18,8 +21,9 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 pub enum ChatActorMessage {
@@ -37,7 +41,7 @@ pub struct ChatActor {
 /// Internal state for the actor implementation
 struct ActorState {
     state: SharedChatState,
-    provider: BedrockProvider,
+    provider: Box<dyn AiProvider>,
     agent_stack: Vec<ActiveAgent>,
     command_handler: CommandHandler,
     settings: Option<Arc<SettingsManager>>,
@@ -48,7 +52,7 @@ impl ChatActor {
     /// Launch the chat actor and return a handle to it
     pub fn launch(
         state: SharedChatState,
-        provider: BedrockProvider,
+        provider: Box<dyn AiProvider>,
         workspace_roots: Vec<PathBuf>,
         settings: Option<Arc<SettingsManager>>,
     ) -> Self {
@@ -109,13 +113,13 @@ async fn run_actor(
                     }
                 }
             }
-            
+
             // Handle cancellation even when no message is being processed
             Some(_) = cancel_rx.recv() => {
                 info!("Cancellation received while idle");
                 // Just consume the cancellation - nothing to cancel when idle
             }
-            
+
             // Both channels closed, exit
             else => {
                 info!("ChatActor shutting down");
@@ -138,22 +142,25 @@ async fn process_message(state: &mut ActorState, message: ChatActorMessage) -> R
 
 fn handle_cancelled(state: &mut ActorState) {
     state.state.set_typing(false);
-    
+
     // Send cancellation event
     let _ = state.state.event_tx.send(ChatEvent::OperationCancelled {
         message: "Operation cancelled by user".to_string(),
     });
-    
-    add_message(&state.state, ChatMessage {
-        content: "Operation cancelled.".to_string(),
-        sender: MessageSender::System,
-        timestamp: Instant::now(),
-        reasoning: None,
-        tool_calls: Vec::new(),
-        model_info: None,
-        context_info: None,
-        token_usage: None,
-    });
+
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: "Operation cancelled.".to_string(),
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
 }
 
 async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
@@ -168,16 +175,19 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 
     state.state.add_to_history(input.clone());
 
-    add_message(&state.state, ChatMessage {
-        content: input.clone(),
-        sender: MessageSender::User,
-        timestamp: Instant::now(),
-        reasoning: None,
-        tool_calls: Vec::new(),
-        model_info: None,
-        context_info: None,
-        token_usage: None,
-    });
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: input.clone(),
+            sender: MessageSender::User,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
 
     current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
@@ -190,7 +200,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 async fn handle_command(state: &mut ActorState, command: &str) {
     let messages = state
         .command_handler
-        .handle_command(command, Some(&state.provider))
+        .handle_command(command, Some(state.provider.as_ref()))
         .await;
 
     for message in messages {
@@ -291,104 +301,112 @@ async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         info!(?request, "AI request");
 
-        match state.provider.converse(request).await {
-            Ok(response) => {
-                let content = response.content.clone();
+        let response = match send_request_with_retry(state, request).await {
+            Ok(response) => response,
+            Err(e) => {
+                state.state.set_typing(false);
+                add_error_message(&state.state, format!("Error: {:?}", e));
+                return Ok(());
+            }
+        };
 
-                // Log detailed response information if trace is enabled
-                info!(?response, "AI response");
+        let content = response.content.clone();
 
-                let reasoning = content.reasoning().first().map(|r| (*r).clone());
-                let tool_calls: Vec<_> =
-                    content.tool_uses().iter().map(|t| (*t).clone()).collect();
+        // Log detailed response information if trace is enabled
+        info!(?response, "AI response");
 
-                add_message(&state.state, ChatMessage {
-                    content: content.text(),
-                    sender: MessageSender::Assistant,
-                    timestamp: Instant::now(),
-                    reasoning,
-                    tool_calls: tool_calls.clone(),
-                    model_info: Some(ModelInfo {
-                        model: model_settings.model,
-                        source: model_source.clone(),
-                    }),
-                    context_info: context_info.clone(),
-                    token_usage: Some(response.usage.clone()),
-                });
+        let reasoning = content.reasoning().first().map(|r| (*r).clone());
+        let tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
+
+        add_message(
+            &state.state,
+            ChatMessage {
+                content: content.text(),
+                sender: MessageSender::Assistant,
+                timestamp: Instant::now(),
+                reasoning,
+                tool_calls: tool_calls.clone(),
+                model_info: Some(ModelInfo {
+                    model: model_settings.model,
+                    source: model_source.clone(),
+                }),
+                context_info: context_info.clone(),
+                token_usage: Some(response.usage.clone()),
+            },
+        );
+
+        current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::Assistant,
+            content: content,
+        });
+
+        if !tool_calls.is_empty() {
+            info!(
+                tool_count = tool_calls.len(),
+                tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
+                "Executing tool calls"
+            );
+
+            for tool_use in &tool_calls {
+                let (result, ui_data) = tool_registry.execute_tool(tool_use).await;
+
+                info!(
+                    tool_name = %tool_use.name,
+                    ?result,
+                    ?ui_data,
+                    "Tool execution completed"
+                );
+
+                // Emit tool completion event
+                let parsed_result = if !result.is_error {
+                    serde_json::from_str(&result.content).ok()
+                } else {
+                    None
+                };
+
+                info!(
+                    "Emitting ToolExecutionCompleted event: tool={}, success={}, has_result={}, has_ui_data={}, has_error={}",
+                    tool_use.name,
+                    !result.is_error,
+                    parsed_result.is_some(),
+                    ui_data.is_some(),
+                    result.is_error
+                );
+
+                let event = ChatEvent::ToolExecutionCompleted {
+                    tool_name: tool_use.name.clone(),
+                    success: !result.is_error,
+                    result: parsed_result,
+                    ui_data,
+                    error: if result.is_error {
+                        Some(result.content.clone())
+                    } else {
+                        None
+                    },
+                };
+
+                // Send the event through the broadcast channel
+                if let Err(e) = state.state.event_tx.send(event.clone()) {
+                    error!("Failed to send tool completion event: {:?}", e);
+                } else {
+                    info!(
+                        "Successfully sent tool completion event for {}",
+                        tool_use.name
+                    );
+                }
 
                 current_agent_mut(state).conversation.push(Message {
-                    role: MessageRole::Assistant,
-                    content: content,
+                    role: MessageRole::User,
+                    content: vec![
+                        ContentBlock::ToolResult(result),
+                        ContentBlock::Text("Here is the tool result:".to_string()),
+                    ]
+                    .into(),
                 });
-
-                if !tool_calls.is_empty() {
-                    info!(
-                        tool_count = tool_calls.len(),
-                        tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
-                        "Executing tool calls"
-                    );
-
-                    for tool_use in &tool_calls {
-                        let result = tool_registry.execute_tool(tool_use).await;
-
-                        info!(
-                            tool_name = %tool_use.name,
-                            ?result,
-                            "Tool execution completed"
-                        );
-
-                        // Emit tool completion event
-                        let parsed_result = if !result.is_error {
-                            serde_json::from_str(&result.content).ok()
-                        } else {
-                            None
-                        };
-                        
-                        info!(
-                            "Emitting ToolExecutionCompleted event: tool={}, success={}, has_result={}, has_error={}",
-                            tool_use.name,
-                            !result.is_error,
-                            parsed_result.is_some(),
-                            result.is_error
-                        );
-                        
-                        let event = ChatEvent::ToolExecutionCompleted {
-                            tool_name: tool_use.name.clone(),
-                            success: !result.is_error,
-                            result: parsed_result,
-                            error: if result.is_error {
-                                Some(result.content.clone())
-                            } else {
-                                None
-                            },
-                        };
-                        
-                        // Send the event through the broadcast channel
-                        if let Err(e) = state.state.event_tx.send(event.clone()) {
-                            error!("Failed to send tool completion event: {:?}", e);
-                        } else {
-                            info!("Successfully sent tool completion event for {}", tool_use.name);
-                        }
-
-                        current_agent_mut(state).conversation.push(Message {
-                            role: MessageRole::User,
-                            content: vec![
-                                ContentBlock::ToolResult(result),
-                                ContentBlock::Text("Here is the tool result:".to_string()),
-                            ]
-                            .into(),
-                        });
-                    }
-                    continue;
-                } else {
-                    break;
-                }
             }
-            Err(e) => {
-                error!(?e, "AI request failed");
-                add_error_message(&state.state, format!("Error: {:?}", e));
-                break;
-            }
+            continue;
+        } else {
+            break;
         }
     }
 
@@ -410,16 +428,19 @@ fn add_message(state: &SharedChatState, message: ChatMessage) {
 }
 
 fn add_error_message(state: &SharedChatState, error: String) {
-    add_message(state, ChatMessage {
-        content: error,
-        sender: MessageSender::Error,
-        timestamp: Instant::now(),
-        reasoning: None,
-        tool_calls: Vec::new(),
-        model_info: None,
-        context_info: None,
-        token_usage: None,
-    });
+    add_message(
+        state,
+        ChatMessage {
+            content: error,
+            sender: MessageSender::Error,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
 }
 
 fn determine_model_settings_and_source(
@@ -444,4 +465,94 @@ fn determine_model_settings_and_source(
     }
 
     (agent.agent.preferred_model(), ModelSource::AgentPreference)
+}
+
+async fn send_request_with_retry(
+    state: &mut ActorState,
+    request: ConversationRequest,
+) -> Result<ConversationResponse> {
+    const MAX_RETRIES: u32 = 1000;
+    const INITIAL_BACKOFF_MS: u64 = 100;
+    const MAX_BACKOFF_MS: u64 = 1000;
+    const BACKOFF_MULTIPLIER: f64 = 2.0;
+
+    let mut attempt = 0;
+
+    loop {
+        match try_send_request(&state.provider, &request).await {
+            Ok(response) => {
+                if attempt > 0 {
+                    info!("Request succeeded after {} retries", attempt);
+                }
+                return Ok(response);
+            }
+            Err(error) => {
+                if !should_retry(&error, attempt, MAX_RETRIES) {
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        "Request failed after {} retries: {}",
+                        attempt,
+                        error
+                    );
+                    return Err(error.into());
+                }
+
+                let backoff_ms = calculate_backoff(
+                    attempt,
+                    INITIAL_BACKOFF_MS,
+                    MAX_BACKOFF_MS,
+                    BACKOFF_MULTIPLIER,
+                );
+
+                emit_retry_event(state, attempt + 1, MAX_RETRIES, &error, backoff_ms);
+
+                warn!(
+                    attempt = attempt + 1,
+                    max_retries = MAX_RETRIES,
+                    backoff_ms,
+                    error = %error,
+                    "Request failed, retrying after backoff"
+                );
+
+                sleep(Duration::from_millis(backoff_ms)).await;
+                attempt += 1;
+            }
+        }
+    }
+}
+
+async fn try_send_request(
+    provider: &Box<dyn AiProvider>,
+    request: &ConversationRequest,
+) -> Result<ConversationResponse, AiError> {
+    provider.converse(request.clone()).await
+}
+
+fn should_retry(error: &AiError, attempt: u32, max_retries: u32) -> bool {
+    matches!(error, AiError::Retryable(_)) && attempt < max_retries
+}
+
+fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64) -> u64 {
+    let base_backoff = initial_ms as f64 * multiplier.powi(attempt as i32);
+    base_backoff.min(max_ms as f64) as u64
+}
+
+fn emit_retry_event(
+    state: &ActorState,
+    attempt: u32,
+    max_retries: u32,
+    error: &AiError,
+    backoff_ms: u64,
+) {
+    let retry_event = ChatEvent::RetryAttempt {
+        attempt,
+        max_retries,
+        error: error.to_string(),
+        backoff_ms,
+    };
+
+    if let Err(e) = state.state.event_tx.send(retry_event) {
+        error!("Failed to send retry event: {:?}", e);
+    }
 }

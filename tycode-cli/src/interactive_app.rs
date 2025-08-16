@@ -5,7 +5,7 @@ use anyhow::Result;
 use rustyline::DefaultEditor;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tycode_core::ai::bedrock::BedrockProvider;
+use tycode_core::ai::provider::AiProvider;
 use tycode_core::ai::types::ModelSettings;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::settings::SettingsManager;
@@ -17,7 +17,7 @@ pub struct InteractiveApp {
 
 impl InteractiveApp {
     pub async fn new(
-        provider: BedrockProvider,
+        provider: Box<dyn AiProvider>,
         tunings: ModelSettings,
         workspace_roots: Option<Vec<std::path::PathBuf>>,
         settings: Option<Arc<SettingsManager>>,

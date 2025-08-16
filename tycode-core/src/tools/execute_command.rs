@@ -1,4 +1,4 @@
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -71,7 +71,7 @@ impl ToolExecutor for ExecuteCommandTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let command_str = arguments
             .get("command")
             .and_then(|v| v.as_str())
@@ -117,14 +117,14 @@ impl ToolExecutor for ExecuteCommandTool {
         let exit_code = output.status.code().unwrap_or(-1);
         let success = output.status.success();
 
-        Ok(json!({
+        Ok(ToolResult::context_only(json!({
             "success": success,
             "exit_code": exit_code,
             "stdout": stdout,
             "stderr": stderr,
             "command": command_str,
             "working_directory": working_dir.display().to_string(),
-        }))
+        })))
     }
 }
 
@@ -143,9 +143,9 @@ mod tests {
         });
 
         let result = tool.execute(&args).await.unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["exit_code"], 0);
-        assert!(result["stdout"].as_str().unwrap().contains("cargo"));
+        assert_eq!(result.context_data["success"], true);
+        assert_eq!(result.context_data["exit_code"], 0);
+        assert!(result.context_data["stdout"].as_str().unwrap().contains("cargo"));
     }
 
     #[tokio::test]
@@ -192,8 +192,8 @@ mod tests {
         });
 
         let result = tool.execute(&args).await.unwrap();
-        assert_eq!(result["success"], true);
-        assert!(result["stdout"]
+        assert_eq!(result.context_data["success"], true);
+        assert!(result.context_data["stdout"]
             .as_str()
             .unwrap()
             .contains("Rust's package manager"));
@@ -231,8 +231,8 @@ mod tests {
         });
 
         let result = tool.execute(&args).await.unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["working_directory"], temp_dir.path().to_str().unwrap());
+        assert_eq!(result.context_data["success"], true);
+        assert_eq!(result.context_data["working_directory"], temp_dir.path().to_str().unwrap());
     }
 
     #[tokio::test]

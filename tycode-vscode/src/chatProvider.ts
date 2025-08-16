@@ -95,6 +95,15 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                         content: data.content
                     });
                     this._view.webview.postMessage({ type: 'hideTyping' });
+                } else if (event === 'retry_attempt') {
+                    // Handle retry attempts
+                    this._view.webview.postMessage({
+                        type: 'retryAttempt',
+                        attempt: data.attempt,
+                        maxRetries: data.max_retries,
+                        error: data.error,
+                        backoffMs: data.backoff_ms
+                    });
                 }
                 // Note: typing events are no longer sent, tool_calls are in Response
             }

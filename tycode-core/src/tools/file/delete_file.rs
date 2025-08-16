@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -39,7 +39,7 @@ impl ToolExecutor for DeleteFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
@@ -48,10 +48,10 @@ impl ToolExecutor for DeleteFileTool {
         // Use FileAccessManager for secure file deletion
         self.file_manager.delete_file(file_path).await?;
 
-        Ok(json!({
+        Ok(ToolResult::context_only(json!({
             "success": true,
             "path": file_path
-        }))
+        })))
     }
 }
 
@@ -78,7 +78,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result.context_data["success"], true);
         assert!(!test_file.exists());
     }
 
@@ -99,7 +99,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result.context_data["success"], true);
         assert!(!test_dir.exists());
     }
 
@@ -151,7 +151,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result.context_data["success"], true);
         assert!(!test_file.exists());
         assert!(sub_dir.exists()); // Directory should still exist
     }

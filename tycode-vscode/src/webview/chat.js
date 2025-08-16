@@ -63,6 +63,8 @@
     let currentResponseGroup = null;
     // Keep track of tool results for the current response
     let pendingToolResults = new Map();
+    // Keep track of retry status element
+    let currentRetryElement = null;
 
     function displayMessage(role, content, details, model, isComplete, reasoning, toolCalls, tokenUsage) {
         // Special handling for AI response components
@@ -216,6 +218,46 @@
                 toggle.textContent = '▶';
             }
         }
+    }
+
+    function displayRetryStatus(attempt, maxRetries, error, backoffMs) {
+        // Create or update retry status element
+        if (!currentRetryElement) {
+            currentRetryElement = document.createElement('div');
+            currentRetryElement.className = 'message system retry-status';
+            messagesContainer.appendChild(currentRetryElement);
+        }
+        
+        // Calculate next attempt time in seconds
+        const nextAttemptIn = (backoffMs / 1000).toFixed(1);
+        
+        // Extract meaningful error message
+        let errorMsg = error;
+        if (error.includes('rate limit') || error.includes('throttled')) {
+            errorMsg = 'Rate limited';
+        } else if (error.includes('timeout')) {
+            errorMsg = 'Request timed out';
+        } else if (error.includes('network') || error.includes('connection')) {
+            errorMsg = 'Network error';
+        } else {
+            // Truncate long errors
+            if (errorMsg.length > 100) {
+                errorMsg = errorMsg.substring(0, 100) + '...';
+            }
+        }
+        
+        currentRetryElement.innerHTML = `
+            <div class="retry-info">
+                <span class="retry-icon">🔄</span>
+                <span class="retry-text">
+                    Retry ${attempt}/${maxRetries} - ${errorMsg}
+                    <br>
+                    <span class="retry-countdown">Next attempt in ${nextAttemptIn}s...</span>
+                </span>
+            </div>
+        `;
+        
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function displayToolResult(toolName, success, result, error, diffId) {
@@ -481,6 +523,14 @@
                     message.diffId
                 );
                 break;
+            case 'retryAttempt':
+                displayRetryStatus(
+                    message.attempt,
+                    message.maxRetries,
+                    message.error,
+                    message.backoffMs
+                );
+                break;
             case 'showTyping':
                 console.log('[DEBUG] showTyping message received');
                 typingIndicator.style.display = 'flex';
@@ -490,6 +540,11 @@
             case 'hideTyping':
                 typingIndicator.style.display = 'none';
                 hideCancelButton();
+                // Clear retry status when processing completes
+                if (currentRetryElement) {
+                    currentRetryElement.style.display = 'none';
+                    currentRetryElement = null;
+                }
                 break;
             case 'operationCancelled':
                 typingIndicator.style.display = 'none';

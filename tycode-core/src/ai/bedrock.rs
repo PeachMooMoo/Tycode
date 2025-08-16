@@ -1,4 +1,5 @@
 use aws_sdk_bedrockruntime::{
+    operation::converse::ConverseError,
     types::{
         ContentBlock as BedrockContentBlock, Message as BedrockMessage, ReasoningContentBlock,
         ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration, ToolInputSchema,
@@ -29,7 +30,7 @@ impl BedrockProvider {
             Model::ClaudeSonnet4 => "us.anthropic.claude-sonnet-4-20250514-v1:0",
             Model::ClaudeSonnet37 => "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
             _ => {
-                return Err(AiError::invalid_request(format!(
+                return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in bedrock",
                     model.name()
                 )))
@@ -51,9 +52,9 @@ impl BedrockProvider {
                     aws_sdk_bedrockruntime::types::ConversationRole::Assistant
                 }
                 MessageRole::System => {
-                    return Err(AiError::invalid_request(
-                        "System messages should be in system_prompt field",
-                    ));
+                    return Err(AiError::Terminal(anyhow::anyhow!(
+                        "System messages should be in system_prompt field"
+                    )));
                 }
             };
 
@@ -91,7 +92,7 @@ impl BedrockProvider {
                             }
 
                             let text_block = text_block_builder.build().map_err(|e| {
-                                AiError::internal(format!(
+                                AiError::Terminal(anyhow::anyhow!(
                                     "Failed to build reasoning text block: {:?}",
                                     e
                                 ))
@@ -110,7 +111,7 @@ impl BedrockProvider {
                             .input(to_doc(tool_use.arguments.clone()))
                             .build()
                             .map_err(|e| {
-                                AiError::internal(format!(
+                                AiError::Terminal(anyhow::anyhow!(
                                     "Failed to build tool use block: {:?}",
                                     e
                                 ))
@@ -123,7 +124,7 @@ impl BedrockProvider {
                             .content(ToolResultContentBlock::Text(tool_result.content.clone()))
                             .build()
                             .map_err(|e| {
-                                AiError::internal(format!(
+                                AiError::Terminal(anyhow::anyhow!(
                                     "Failed to build tool result block: {:?}",
                                     e
                                 ))
@@ -142,7 +143,9 @@ impl BedrockProvider {
                     .role(role)
                     .set_content(Some(content_blocks))
                     .build()
-                    .map_err(|e| AiError::internal(format!("Failed to build message: {:?}", e)))?,
+                    .map_err(|e| {
+                        AiError::Terminal(anyhow::anyhow!("Failed to build message: {:?}", e))
+                    })?,
             );
         }
 
@@ -213,7 +216,7 @@ impl AiProvider for BedrockProvider {
         request
             .model
             .validate()
-            .map_err(|e| AiError::invalid_request(&e))?;
+            .map_err(|e| AiError::Terminal(anyhow::anyhow!(e)))?;
 
         let model_id = self.get_bedrock_model_id(&request.model.model)?;
         let bedrock_messages = self.convert_to_bedrock_messages(&request.messages)?;
@@ -292,7 +295,24 @@ impl AiProvider for BedrockProvider {
 
         let response = converse_request.send().await.map_err(|e| {
             tracing::warn!(?e, "Bedrock converse failed");
-            AiError::provider(e)
+
+            match e.into_service_error() {
+                ConverseError::ThrottlingException(e) => AiError::Retryable(anyhow::anyhow!(e)),
+                ConverseError::ServiceUnavailableException(e) => {
+                    AiError::Retryable(anyhow::anyhow!(e))
+                }
+                ConverseError::InternalServerException(e) => AiError::Retryable(anyhow::anyhow!(e)),
+                ConverseError::ModelTimeoutException(e) => AiError::Retryable(anyhow::anyhow!(e)),
+
+                ConverseError::ResourceNotFoundException(e) => {
+                    AiError::Terminal(anyhow::anyhow!(e))
+                }
+                ConverseError::AccessDeniedException(e) => AiError::Terminal(anyhow::anyhow!(e)),
+                ConverseError::ModelErrorException(e) => AiError::Terminal(anyhow::anyhow!(e)),
+                ConverseError::ModelNotReadyException(e) => AiError::Terminal(anyhow::anyhow!(e)),
+                ConverseError::ValidationException(e) => AiError::Terminal(anyhow::anyhow!(e)),
+                _ => AiError::Terminal(anyhow::anyhow!("Unknown error from bedrock")),
+            }
         })?;
 
         tracing::debug!("Full response: {:?}", response);
@@ -315,9 +335,9 @@ impl AiProvider for BedrockProvider {
 
         let message = response
             .output
-            .ok_or_else(|| AiError::internal("No output in response".to_string()))?
+            .ok_or_else(|| AiError::Terminal(anyhow::anyhow!("No output in response")))?
             .as_message()
-            .map_err(|_| AiError::internal("Output is not a message".to_string()))?
+            .map_err(|_| AiError::Terminal(anyhow::anyhow!("Output is not a message")))?
             .clone();
 
         tracing::debug!("Message content blocks: {:?}", message.content());

@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -110,7 +110,7 @@ impl ToolExecutor for ApplyPatchTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
@@ -132,13 +132,21 @@ impl ToolExecutor for ApplyPatchTool {
             .write_file(file_path, &patched_content)
             .await?;
 
-        Ok(json!({
+        // Context data: minimal information for the conversation
+        let context_data = json!({
             "success": true,
             "path": file_path,
-            "message": "Patch applied successfully",
+            "message": "Patch applied successfully"
+        });
+
+        // UI data: full content for diff display in VSCode
+        let ui_data = json!({
+            "path": file_path,
             "original_content": original_content,
             "new_content": patched_content
-        }))
+        });
+
+        Ok(ToolResult::with_ui(context_data, ui_data))
     }
 }
 
@@ -176,7 +184,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result["success"], true);
+        assert_eq!(result.context_data["success"], true);
 
         // Verify the content was patched
         let new_content = file_manager.read_file("test.txt").await.unwrap();

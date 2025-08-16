@@ -1,6 +1,6 @@
 use crate::chat::state::SharedChatState;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -48,7 +48,7 @@ impl ToolExecutor for SetTrackedFilesTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_paths = arguments
             .get("file_paths")
             .and_then(|v| v.as_array())
@@ -87,7 +87,7 @@ impl ToolExecutor for SetTrackedFilesTool {
             }
         }
 
-        Ok(json!({
+        Ok(ToolResult::context_only(json!({
             "success": true,
             "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
             "tracked_files_count": new_paths.len(),
@@ -97,6 +97,6 @@ impl ToolExecutor for SetTrackedFilesTool {
             } else {
                 format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
             }
-        }))
+        })))
     }
 }

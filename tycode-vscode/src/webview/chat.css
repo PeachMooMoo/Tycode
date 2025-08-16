@@ -145,6 +145,55 @@ body {
     font-style: italic;
 }
 
+/* Retry Status Styling */
+.message.retry-status {
+    background: rgba(255, 165, 0, 0.08);
+    border-left: 3px solid var(--vscode-terminal-ansiYellow);
+    font-style: normal;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 0.8;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.retry-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.retry-icon {
+    font-size: 16px;
+    animation: spin 2s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.retry-text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.retry-countdown {
+    font-size: 11px;
+    color: var(--secondary-text);
+    font-weight: 500;
+}
+
 /* AI Response Grouping */
 .ai-response-group {
     display: flex;

@@ -1,8 +1,9 @@
 use anyhow::Result;
+use aws_config::retry::RetryConfig;
 use clap::Parser;
 use std::sync::Arc;
 use tycode_core::{
-    ai::{bedrock::BedrockProvider, types::ModelSettings},
+    ai::{bedrock::BedrockProvider, provider::AiProvider, types::ModelSettings},
     chat,
     settings::SettingsManager,
 };
@@ -123,21 +124,16 @@ async fn async_main() -> Result<()> {
     let aws_region = args.region.clone();
 
     // Set up provider with determined values
-    let provider = {
+    let provider: Box<dyn AiProvider> = {
         let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .profile_name(&aws_profile)
             .region(aws_config::Region::new(aws_region))
-            .retry_config(
-                aws_config::retry::RetryConfig::adaptive()
-                    .with_max_attempts(30)
-                    .with_initial_backoff(std::time::Duration::from_millis(100))
-                    .with_max_backoff(std::time::Duration::from_secs(1)),
-            )
+            .retry_config(RetryConfig::disabled())
             .load()
             .await;
 
         let bedrock_client = aws_sdk_bedrockruntime::Client::new(&aws_config);
-        BedrockProvider::new(bedrock_client)
+        Box::new(BedrockProvider::new(bedrock_client))
     };
 
     // Set up tunings (CLI args take precedence)
@@ -154,13 +150,20 @@ async fn async_main() -> Result<()> {
         return Err(anyhow::anyhow!("Invalid model tunings: {}", e));
     }
 
-    let workspace_roots = args.workspace_roots.map(|roots| -> Result<Vec<std::path::PathBuf>> {
-        roots.into_iter().map(|root| {
-            let path = std::path::PathBuf::from(root);
-            path.canonicalize()
-                .map_err(|e| anyhow::anyhow!("Failed to canonicalize workspace root {:?}: {}", path, e))
-        }).collect()
-    }).transpose()?;
+    let workspace_roots = args
+        .workspace_roots
+        .map(|roots| -> Result<Vec<std::path::PathBuf>> {
+            roots
+                .into_iter()
+                .map(|root| {
+                    let path = std::path::PathBuf::from(root);
+                    path.canonicalize().map_err(|e| {
+                        anyhow::anyhow!("Failed to canonicalize workspace root {:?}: {}", path, e)
+                    })
+                })
+                .collect()
+        })
+        .transpose()?;
 
     // Create and run the appropriate app based on mode
     if args.subprocess {

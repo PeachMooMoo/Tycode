@@ -122,32 +122,41 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub async fn execute_tool(&self, tool_use: &ToolUseData) -> ToolResultData {
+    pub async fn execute_tool(&self, tool_use: &ToolUseData) -> (ToolResultData, Option<serde_json::Value>) {
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
             None => {
                 error!(tool_name = %tool_use.name, "Unknown tool");
-                return ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content: format!("Unknown tool: {}", tool_use.name),
-                    is_error: true,
-                };
+                return (
+                    ToolResultData {
+                        tool_use_id: tool_use.id.clone(),
+                        content: format!("Unknown tool: {}", tool_use.name),
+                        is_error: true,
+                    },
+                    None,
+                );
             }
         };
 
         match tool.execute(&tool_use.arguments).await {
-            Ok(result) => ToolResultData {
-                tool_use_id: tool_use.id.clone(),
-                content: result.to_string(),
-                is_error: false,
-            },
-            Err(e) => {
-                error!(?e, tool_name = %tool_use.name, "Tool execution failed");
+            Ok(result) => (
                 ToolResultData {
                     tool_use_id: tool_use.id.clone(),
-                    content: format!("Error: {:?}", e),
-                    is_error: true,
-                }
+                    content: result.context_data.to_string(),
+                    is_error: false,
+                },
+                result.ui_data,
+            ),
+            Err(e) => {
+                error!(?e, tool_name = %tool_use.name, "Tool execution failed");
+                (
+                    ToolResultData {
+                        tool_use_id: tool_use.id.clone(),
+                        content: format!("Error: {:?}", e),
+                        is_error: true,
+                    },
+                    None,
+                )
             }
         }
     }
@@ -189,7 +198,7 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7); // Including execute_command
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
@@ -209,13 +218,14 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7); // Including execute_command
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"replace_in_file"));
         assert!(tools.contains(&"delete_file"));
+        assert!(tools.contains(&"execute_command"));
         assert!(!tools.contains(&"apply_patch"));
     }
 
@@ -229,7 +239,7 @@ mod tests {
         );
 
         let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 6);
+        assert_eq!(definitions.len(), 7); // Including execute_command
 
         let read_file_def = definitions
             .iter()
@@ -259,7 +269,7 @@ mod tests {
             }),
         };
 
-        let result = registry.execute_tool(&tool_use).await;
+        let (result, _ui_data) = registry.execute_tool(&tool_use).await;
         assert!(!result.is_error);
 
         let content: serde_json::Value = serde_json::from_str(&result.content).unwrap();
@@ -281,7 +291,7 @@ mod tests {
             arguments: json!({}),
         };
 
-        let result = registry.execute_tool(&tool_use).await;
+        let (result, _ui_data) = registry.execute_tool(&tool_use).await;
         assert!(result.is_error);
         assert!(result.content.contains("Unknown tool"));
     }

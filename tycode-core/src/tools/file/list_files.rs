@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -43,7 +43,7 @@ impl ToolExecutor for ListFilesTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let directory_path = arguments.get("directory_path").and_then(|v| v.as_str());
 
         let mut all_entries = Vec::new();
@@ -122,9 +122,9 @@ impl ToolExecutor for ListFilesTool {
             }
         });
 
-        Ok(json!({
+        Ok(ToolResult::context_only(json!({
             "entries": all_entries,
             "path": display_path,
-        }))
+        })))
     }
 }

@@ -1,5 +1,5 @@
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -73,7 +73,7 @@ impl ToolExecutor for ReadFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<Value> {
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
         let file_path = arguments
             .get("file_path")
             .and_then(|v| v.as_str())
@@ -89,12 +89,12 @@ impl ToolExecutor for ReadFileTool {
                 // Try to read the index file
                 let index_path_str = index_path.to_string_lossy().to_string();
                 if let Ok(summary_content) = self.file_manager.read_file(&index_path_str).await {
-                    return Ok(json!({
+                    return Ok(ToolResult::context_only(json!({
                         "content": summary_content,
                         "size": summary_content.len(),
                         "path": file_path,
                         "is_summary": true
-                    }));
+                    })));
                 }
             }
             
@@ -115,11 +115,11 @@ impl ToolExecutor for ReadFileTool {
         // Read the full file
         let content = self.file_manager.read_file(file_path).await?;
 
-        Ok(json!({
+        Ok(ToolResult::context_only(json!({
             "content": content,
             "size": content.len(),
             "path": file_path,
             "is_summary": false
-        }))
+        })))
     }
 }
