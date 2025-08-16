@@ -142,6 +142,15 @@ export class Conversation extends EventEmitter {
         await this.bridge.sendMessage(content);
     }
 
+    async sendCancel(): Promise<void> {
+        if (!this._isActive) {
+            throw new Error('Conversation is not active');
+        }
+        
+        // Send cancel to subprocess
+        await this.bridge.sendCancel();
+    }
+
     private generateTitleFromMessage(message: string): string {
         // Remove leading/trailing whitespace
         let title = message.trim();

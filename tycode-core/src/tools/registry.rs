@@ -182,7 +182,11 @@ mod tests {
     #[tokio::test]
     async fn test_tool_registry_creation_patch_api() {
         let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+            None,
+        );
 
         let tools = registry.list_tools();
         assert_eq!(tools.len(), 6);
@@ -199,8 +203,9 @@ mod tests {
     async fn test_tool_registry_creation_find_replace_api() {
         let temp_dir = tempdir().unwrap();
         let registry = ToolRegistry::new(
-            temp_dir.path().to_path_buf(),
+            vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
+            None,
         );
 
         let tools = registry.list_tools();
@@ -217,7 +222,11 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+            None,
+        );
 
         let definitions = registry.get_tool_definitions();
         assert_eq!(definitions.len(), 6);
@@ -232,7 +241,11 @@ mod tests {
     #[tokio::test]
     async fn test_tool_execution() {
         let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+            None,
+        );
 
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "Hello, registry!").unwrap();
@@ -256,7 +269,11 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_tool() {
         let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+            None,
+        );
 
         let tool_use = ToolUseData {
             id: "test_id".to_string(),
@@ -272,7 +289,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_tool_definitions_for_types() {
         let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(temp_dir.path().to_path_buf(), FileModificationApi::Patch);
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+            None,
+        );
 
         let tool_types = vec![
             ToolType::ReadFile,
@@ -293,8 +314,9 @@ mod tests {
     async fn test_get_tool_definitions_for_types_find_replace() {
         let temp_dir = tempdir().unwrap();
         let registry = ToolRegistry::new(
-            temp_dir.path().to_path_buf(),
+            vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
+            None,
         );
 
         let tool_types = vec![

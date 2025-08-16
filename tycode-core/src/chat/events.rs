@@ -17,6 +17,9 @@ pub enum ChatEvent {
         result: Option<serde_json::Value>,
         error: Option<String>,
     },
+    OperationCancelled {
+        message: String,
+    },
     Error(String),
 }
 

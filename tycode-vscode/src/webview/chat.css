@@ -605,6 +605,30 @@ body {
     cursor: not-allowed;
 }
 
+.cancel-button {
+    background: var(--vscode-statusBarItem-errorBackground, #d73a49);
+    color: var(--button-foreground);
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    align-self: flex-end;
+    min-width: 60px;
+}
+
+.cancel-button:hover {
+    background: var(--vscode-statusBarItem-errorBackground);
+    opacity: 0.9;
+    transform: scale(0.98);
+}
+
+.cancel-button:active {
+    transform: scale(0.95);
+}
+
 /* Scrollbar styling */
 .messages::-webkit-scrollbar {
     width: 6px;

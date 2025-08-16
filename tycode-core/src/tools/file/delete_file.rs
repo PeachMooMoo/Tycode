@@ -64,7 +64,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_file() {
         let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+        let tool = DeleteFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Create a test file
         let test_file = temp_dir.path().join("test.txt");
@@ -85,7 +85,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_empty_directory() {
         let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+        let tool = DeleteFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Create an empty directory
         let test_dir = temp_dir.path().join("test_dir");
@@ -106,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_nonexistent_file() {
         let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+        let tool = DeleteFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Try to delete a file that doesn't exist
         let result = tool
@@ -121,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn test_missing_file_path() {
         let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+        let tool = DeleteFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         let result = tool.execute(&json!({})).await;
 
@@ -135,7 +135,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_file_with_subdirectory() {
         let temp_dir = tempdir().unwrap();
-        let tool = DeleteFileTool::new(temp_dir.path().to_path_buf());
+        let tool = DeleteFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Create a subdirectory with a file
         let sub_dir = temp_dir.path().join("subdir");

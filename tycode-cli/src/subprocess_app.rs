@@ -88,9 +88,6 @@ impl SubprocessApp {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
-        // Cleanup
-        self.base.shutdown().await?;
-
         Ok(())
     }
 
@@ -99,6 +96,10 @@ impl SubprocessApp {
             Ok(SubprocessMessage::Chat { message }) => {
                 // Send message to chat actor
                 self.base.send_message(message).await?;
+            }
+            Ok(SubprocessMessage::Cancel) => {
+                // Send cancel message to chat actor
+                self.base.cancel().await?;
             }
             Ok(_) => {
                 // Ignore other message types (they're outgoing only)
@@ -187,6 +188,10 @@ impl SubprocessApp {
                 })
             },
             ChatEvent::TypingStatusChanged(_) => None, // Ignore typing status - not useful
+            ChatEvent::OperationCancelled { message } => Some(SubprocessMessage::Event {
+                event: "cancelled".to_string(),
+                data: serde_json::json!({ "message": message }),
+            }),
             _ => None,
         };
 

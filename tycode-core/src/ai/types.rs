@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -83,16 +83,17 @@ impl MessageContext {
                 if path.is_empty() {
                     return;
                 }
-                
+
                 if path.len() == 1 {
-                    self.children.entry(path[0].to_string())
-                        .or_insert_with(|| {
-                            let mut node = TreeNode::new();
-                            node.is_file = true;
-                            node
-                        });
+                    self.children.entry(path[0].to_string()).or_insert_with(|| {
+                        let mut node = TreeNode::new();
+                        node.is_file = true;
+                        node
+                    });
                 } else {
-                    let child = self.children.entry(path[0].to_string())
+                    let child = self
+                        .children
+                        .entry(path[0].to_string())
                         .or_insert_with(TreeNode::new);
                     child.insert(&path[1..]);
                 }
@@ -101,7 +102,7 @@ impl MessageContext {
             fn format(&self, indent: usize) -> String {
                 let mut result = String::new();
                 let indent_str = " ".repeat(indent);
-                
+
                 for (name, node) in &self.children {
                     if node.is_file || node.children.is_empty() {
                         result.push_str(&format!("{}{}\n", indent_str, name));
@@ -110,19 +111,19 @@ impl MessageContext {
                         result.push_str(&node.format(indent + 2));
                     }
                 }
-                
+
                 result
             }
         }
 
         let mut root = TreeNode::new();
-        
+
         for file in &self.relevant_files {
             let path_str = file.to_string_lossy();
             let parts: Vec<&str> = path_str.split('/').collect();
             root.insert(&parts);
         }
-        
+
         root.format(2)
     }
 }
@@ -434,8 +435,8 @@ mod tests {
 
     #[test]
     fn test_file_tree_compaction() {
-        let mut context = MessageContext::new(PathBuf::from("."));
-        
+        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
+
         // Add files that would be repetitive in flat format
         context.relevant_files = vec![
             PathBuf::from("Cargo.toml"),
@@ -449,9 +450,9 @@ mod tests {
             PathBuf::from("tests/test1.rs"),
             PathBuf::from("tests/test2.rs"),
         ];
-        
+
         let formatted = context.to_formatted_string();
-        
+
         // Verify the tree structure
         assert!(formatted.contains("Project Files:"));
         assert!(formatted.contains("  Cargo.toml"));
@@ -468,38 +469,44 @@ mod tests {
         assert!(formatted.contains("  tests/"));
         assert!(formatted.contains("    test1.rs"));
         assert!(formatted.contains("    test2.rs"));
-        
+
         // Count characters to show compaction
         let tree_size = formatted.len();
-        
+
         // Compare with what flat format would be
         let flat_format = format!(
             "Working Directory: .\n\nProject Files:\n  - Cargo.toml\n  - src/main.rs\n  - src/lib.rs\n  - src/module/file1.rs\n  - src/module/file2.rs\n  - src/module/submodule/file1.rs\n  - src/module/submodule/file2.rs\n  - src/module/submodule/file3.rs\n  - tests/test1.rs\n  - tests/test2.rs\n\n"
         );
         let flat_size = flat_format.len();
-        
+
         println!("Tree format size: {} chars", tree_size);
         println!("Flat format size: {} chars", flat_size);
-        println!("Savings: {} chars ({:.1}% reduction)", flat_size - tree_size, 
-                 ((flat_size - tree_size) as f64 / flat_size as f64) * 100.0);
-        
+        println!(
+            "Savings: {} chars ({:.1}% reduction)",
+            flat_size - tree_size,
+            ((flat_size - tree_size) as f64 / flat_size as f64) * 100.0
+        );
+
         // Tree format should be more compact
-        assert!(tree_size < flat_size, "Tree format should be more compact than flat format");
+        assert!(
+            tree_size < flat_size,
+            "Tree format should be more compact than flat format"
+        );
     }
 
     #[test]
     fn test_file_tree_single_files() {
-        let mut context = MessageContext::new(PathBuf::from("."));
-        
+        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
+
         // Test with just root-level files
         context.relevant_files = vec![
             PathBuf::from("README.md"),
             PathBuf::from("Cargo.toml"),
             PathBuf::from(".gitignore"),
         ];
-        
+
         let formatted = context.to_formatted_string();
-        
+
         assert!(formatted.contains("  README.md"));
         assert!(formatted.contains("  Cargo.toml"));
         assert!(formatted.contains("  .gitignore"));
@@ -509,16 +516,16 @@ mod tests {
 
     #[test]
     fn test_file_tree_deep_nesting() {
-        let mut context = MessageContext::new(PathBuf::from("."));
-        
+        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
+
         // Test with deeply nested structure
         context.relevant_files = vec![
             PathBuf::from("a/b/c/d/e/file.rs"),
             PathBuf::from("a/b/c/d/e/file2.rs"),
         ];
-        
+
         let formatted = context.to_formatted_string();
-        
+
         // Should create nested structure
         assert!(formatted.contains("  a/"));
         assert!(formatted.contains("    b/"));

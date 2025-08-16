@@ -175,6 +175,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'viewDiff':
                     await this.showDiff(data.diffId);
                     break;
+                case 'cancel':
+                    await this.handleCancel(data.conversationId);
+                    break;
             }
         });
 
@@ -264,6 +267,25 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 type: 'conversationCleared',
                 conversationId
             });
+        }
+    }
+
+    private async handleCancel(conversationId: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        try {
+            await conversation.sendCancel();
+            // Hide typing indicator immediately when cancel is successful
+            this.sendToWebview({
+                type: 'showTyping',
+                conversationId,
+                show: false
+            });
+        } catch (error) {
+            console.error('[MainProvider] Failed to cancel:', error);
         }
     }
 

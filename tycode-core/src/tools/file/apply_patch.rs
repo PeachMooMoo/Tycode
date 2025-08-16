@@ -150,10 +150,10 @@ mod tests {
     #[tokio::test]
     async fn test_apply_patch() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = ApplyPatchTool::new(temp_dir.path().to_path_buf());
+        let tool = ApplyPatchTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Create a test file using FileAccessManager
-        let file_manager = FileAccessManager::new(temp_dir.path().to_path_buf());
+        let file_manager = FileAccessManager::new(vec![temp_dir.path().to_path_buf()]);
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
             .write_file("test.txt", original_content)

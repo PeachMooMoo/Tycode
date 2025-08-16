@@ -4,23 +4,40 @@
     const messagesContainer = document.getElementById('messages');
     const messageInput = document.getElementById('message-input');
     const sendButton = document.getElementById('send-button');
+    const cancelButton = document.getElementById('cancel-button');
     const clearButton = document.getElementById('clear-chat');
     const typingIndicator = document.getElementById('typing-indicator');
+    
+    // Track if we're currently processing
+    let isProcessing = false;
 
     // Send message when clicking send button
     sendButton.addEventListener('click', sendMessage);
+
+    // Handle cancel with smart auto-send
+    cancelButton.addEventListener('click', handleCancel);
 
     // Send message when pressing Enter (without Shift)
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            if (!isProcessing) {
+                sendMessage();
+            } else {
+                // If processing, Enter key triggers cancel with auto-send
+                handleCancel();
+            }
         }
     });
 
     // Clear chat
     clearButton.addEventListener('click', () => {
-        messagesContainer.innerHTML = '';
+        // Remove all children except the cancel button
+        Array.from(messagesContainer.children).forEach(child => {
+            if (child !== cancelButton) {
+                child.remove();
+            }
+        });
         vscode.postMessage({ type: 'clear' });
     });
 
@@ -248,7 +265,7 @@
                         }
                         // Add View Diff button if diffId is available
                         if (diffId) {
-                            resultContent += `<button class="view-diff-button" onclick="viewDiff('${diffId}')">📝 View Diff</button>`;
+                            resultContent += `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>`;
                         }
                     } else {
                         resultContent = `<div class="tool-success-message">✓ File operation completed</div>`;
@@ -284,18 +301,27 @@
             }
             
             resultDiv.innerHTML = resultContent;
+            
+            // Add event listener for View Diff button if it exists
+            const viewDiffButton = resultDiv.querySelector('.view-diff-button');
+            if (viewDiffButton) {
+                viewDiffButton.addEventListener('click', function() {
+                    const diffId = this.getAttribute('data-diff-id');
+                    viewDiff(diffId);
+                });
+            }
         }
         
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
-    // Add global function to handle View Diff button clicks
-    window.viewDiff = function(diffId) {
+    // Function to handle View Diff button clicks (no longer global)
+    function viewDiff(diffId) {
         vscode.postMessage({
             type: 'viewDiff',
             diffId: diffId
         });
-    };
+    }
 
     function renderContent(content) {
         // Escape HTML first
@@ -362,30 +388,71 @@
             const copyButton = document.createElement('button');
             copyButton.className = 'code-action-button';
             copyButton.textContent = 'Copy';
-            copyButton.onclick = () => {
+            copyButton.addEventListener('click', () => {
                 const code = block.querySelector('code').textContent;
                 vscode.postMessage({
                     type: 'copyCode',
                     code: code
                 });
-            };
+            });
 
             // Insert button
             const insertButton = document.createElement('button');
             insertButton.className = 'code-action-button';
             insertButton.textContent = 'Insert';
-            insertButton.onclick = () => {
+            insertButton.addEventListener('click', () => {
                 const code = block.querySelector('code').textContent;
                 vscode.postMessage({
                     type: 'insertCode',
                     code: code
                 });
-            };
+            });
 
             actionsDiv.appendChild(copyButton);
             actionsDiv.appendChild(insertButton);
             block.appendChild(actionsDiv);
         });
+    }
+
+    // Handle cancel with smart auto-send
+    function handleCancel() {
+        // Get any pending text in the input
+        const pendingMessage = messageInput.value.trim();
+        
+        // Send cancel command
+        vscode.postMessage({ type: 'cancel' });
+        
+        // If there's pending text, send it after a short delay
+        if (pendingMessage) {
+            // Clear the input first
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Wait a brief moment for cancel to process, then send the new message
+            setTimeout(() => {
+                // Display user message
+                displayMessage('user', pendingMessage);
+                
+                // Send to extension
+                vscode.postMessage({
+                    type: 'sendMessage',
+                    message: pendingMessage
+                });
+            }, 100);
+        }
+    }
+
+    // Function to swap send/cancel buttons
+    function showCancelButton() {
+        isProcessing = true;
+        sendButton.style.display = 'none';
+        cancelButton.style.display = 'block';
+    }
+
+    function hideCancelButton() {
+        isProcessing = false;
+        cancelButton.style.display = 'none';
+        sendButton.style.display = 'block';
     }
 
     // Handle messages from extension
@@ -415,11 +482,19 @@
                 );
                 break;
             case 'showTyping':
+                console.log('[DEBUG] showTyping message received');
                 typingIndicator.style.display = 'flex';
+                showCancelButton();
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 break;
             case 'hideTyping':
                 typingIndicator.style.display = 'none';
+                hideCancelButton();
+                break;
+            case 'operationCancelled':
+                typingIndicator.style.display = 'none';
+                hideCancelButton();
+                displayMessage('system', message.content || 'Operation cancelled');
                 break;
         }
     });

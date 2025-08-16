@@ -132,6 +132,18 @@ export class SubprocessBridge extends EventEmitter {
         this.child.stdin.write(JSON.stringify(msg) + '\n');
     }
 
+    async sendCancel(): Promise<void> {
+        if (!this.child || !this.child.stdin) {
+            throw new Error('Subprocess not initialized');
+        }
+
+        const msg: SubprocessMessage = {
+            type: 'Cancel'
+        };
+
+        this.child.stdin.write(JSON.stringify(msg) + '\n');
+    }
+
     private handleMessage(message: SubprocessMessage) {
         console.log('[SubprocessBridge] Received message:', message.type, message);
         this.emit('message', message);

@@ -177,20 +177,57 @@
             <div class="input-container">
                 <textarea class="message-input" placeholder="Ask me anything about your code..." rows="3"></textarea>
                 <button class="send-button">Send</button>
+                <button class="cancel-button" style="display: none;">Cancel</button>
             </div>
         `;
 
         // Set up event listeners for this conversation
         const messageInput = conversationView.querySelector('.message-input');
         const sendButton = conversationView.querySelector('.send-button');
+        const cancelButton = conversationView.querySelector('.cancel-button');
         const clearButton = conversationView.querySelector('.clear-chat');
 
         sendButton.addEventListener('click', () => sendMessage(id, messageInput));
+        
+        // Add cancel button handler with smart auto-send
+        cancelButton.addEventListener('click', () => {
+            // Get any pending text in the input
+            const pendingMessage = messageInput.value.trim();
+            
+            // Send cancel command with conversationId
+            vscode.postMessage({ 
+                type: 'cancel',
+                conversationId: id 
+            });
+            
+            // If there's pending text, send it after a short delay
+            if (pendingMessage) {
+                // Clear the input first
+                messageInput.value = '';
+                messageInput.style.height = 'auto';
+                
+                // Wait a brief moment for cancel to process, then send the new message
+                setTimeout(() => {
+                    // Send to extension
+                    vscode.postMessage({
+                        type: 'sendMessage',
+                        conversationId: id,
+                        message: pendingMessage
+                    });
+                }, 100);
+            }
+        });
 
         messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage(id, messageInput);
+                const conversation = conversations.get(id);
+                // If processing, Enter key triggers cancel with auto-send
+                if (conversation && conversation.isProcessing) {
+                    cancelButton.click();
+                } else {
+                    sendMessage(id, messageInput);
+                }
             }
         });
 
@@ -442,6 +479,24 @@
             if (message.show) {
                 const messagesContainer = conversation.viewElement.querySelector('.messages');
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            
+            // Swap send/cancel buttons
+            const sendButton = conversation.viewElement.querySelector('.send-button');
+            const cancelButton = conversation.viewElement.querySelector('.cancel-button');
+            
+            if (sendButton && cancelButton) {
+                if (message.show) {
+                    // Show cancel, hide send
+                    sendButton.style.display = 'none';
+                    cancelButton.style.display = 'block';
+                    conversation.isProcessing = true;
+                } else {
+                    // Show send, hide cancel
+                    sendButton.style.display = 'block';
+                    cancelButton.style.display = 'none';
+                    conversation.isProcessing = false;
+                }
             }
         }
     }

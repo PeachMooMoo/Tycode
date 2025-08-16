@@ -7,6 +7,7 @@ pub enum SubprocessMessage {
     Chat {
         message: String,
     },
+    Cancel,
 
     // Outgoing messages
     Response {

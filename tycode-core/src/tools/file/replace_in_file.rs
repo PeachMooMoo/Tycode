@@ -142,10 +142,10 @@ mod tests {
     #[tokio::test]
     async fn test_replace_in_file() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = ReplaceInFileTool::new(temp_dir.path().to_path_buf());
+        let tool = ReplaceInFileTool::new(vec![temp_dir.path().to_path_buf()]);
 
         // Create a test file using FileAccessManager
-        let file_manager = FileAccessManager::new(temp_dir.path().to_path_buf());
+        let file_manager = FileAccessManager::new(vec![temp_dir.path().to_path_buf()]);
         file_manager
             .write_file("test.txt", "Hello World\nThis is a test\nGoodbye")
             .await

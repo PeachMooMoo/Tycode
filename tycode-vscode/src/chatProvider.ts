@@ -155,6 +155,9 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                 case 'viewDiff':
                     await this.showDiff(data.diffId);
                     break;
+                case 'cancel':
+                    await this._bridge.sendCancel();
+                    break;
             }
         });
     }
@@ -191,6 +194,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         this._messageHistory.push({ role: 'user', content: message });
 
         // Show typing indicator
+        console.log('[ChatProvider] Sending showTyping message');
         this._view.webview.postMessage({ type: 'showTyping' });
 
         try {
@@ -306,6 +310,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                             rows="3"
                         ></textarea>
                         <button id="send-button" class="send-button">Send</button>
+                        <button id="cancel-button" class="cancel-button" style="display: none;">Cancel</button>
                     </div>
                 </div>
                 <script nonce="${nonce}" src="${scriptUri}"></script>

@@ -83,8 +83,6 @@ impl InteractiveApp {
             self.wait_for_response().await?;
         }
 
-        // Shutdown the actor
-        self.base.shutdown().await?;
         println!("\nGoodbye!");
         Ok(())
     }
