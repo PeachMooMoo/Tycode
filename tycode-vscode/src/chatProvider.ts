@@ -26,6 +26,45 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         console.log('[ChatProvider] Bridge listeners before:', this._bridge.eventNames());
 
         // Set up event listeners for subprocess responses
+        this.setupBridgeListeners();
+
+        console.log('[ChatProvider] Bridge listeners after:', this._bridge.eventNames());
+        console.log('[ChatProvider] Bridge toolResult listener count:', this._bridge.listenerCount('toolResult'));
+    }
+
+    
+
+    private async switchProvider(provider: string): Promise<void> {
+        // Send cancel first to stop any ongoing processing
+        await this._bridge.sendCancel();
+        
+        // Then send provider change message
+        await this._bridge.changeProvider(provider);
+
+        // Notify webview of the switch
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'providerSwitched',
+                newProvider: provider
+            });
+        }
+    }
+
+    private setupBridgeListeners() {
+        // Listen for settings reload events to update the provider dropdown
+        this._bridge.on('settingsReloaded', (settings: any) => {
+            if (this._view) {
+                const providers = Object.keys(settings.providers || {});
+                const selectedProvider = settings.active_provider || 'default';
+                
+                this._view.webview.postMessage({
+                    type: 'providerConfig',
+                    providers: providers,
+                    selectedProvider: selectedProvider
+                });
+            }
+        });
+
         this._bridge.on('response', (response: any) => {
             if (this._view) {
                 // Display the main response with embedded reasoning and tool calls
@@ -83,9 +122,6 @@ export class ChatProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        console.log('[ChatProvider] Bridge listeners after:', this._bridge.eventNames());
-        console.log('[ChatProvider] Bridge toolResult listener count:', this._bridge.listenerCount('toolResult'));
-
         this._bridge.on('event', (event: string, data: any) => {
             if (this._view) {
                 if (event === 'system') {
@@ -105,7 +141,6 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                         backoffMs: data.backoff_ms
                     });
                 }
-                // Note: typing events are no longer sent, tool_calls are in Response
             }
         });
 
@@ -145,6 +180,8 @@ export class ChatProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
+        // Provider configuration will be loaded from subprocess when needed
+
         // Handle messages from the webview
         webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.type) {
@@ -166,6 +203,48 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'cancel':
                     await this._bridge.sendCancel();
+                    break;
+                case 'switchProvider':
+                    await this.switchProvider(data.provider);
+                    break;
+                case 'getProviders':
+                    // First reload settings from disk to ensure we have the latest
+                    try {
+                        await this._bridge.reloadSettings();
+                        // Now get the fresh settings from cache
+                        const settings = this._bridge.getSettings();
+                        if (settings) {
+                            const providers = Object.keys(settings.providers || {});
+                            const selectedProvider = settings.active_provider || 'default';
+                            
+                            this._view?.webview.postMessage({
+                                type: 'providerConfig',
+                                providers: providers,
+                                selectedProvider: selectedProvider
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Failed to reload providers:', error);
+                        // Fallback to cached settings
+                        const settings = this._bridge.getSettings();
+                        if (settings) {
+                            const providers = Object.keys(settings.providers || {});
+                            const selectedProvider = settings.active_provider || 'default';
+                            
+                            this._view?.webview.postMessage({
+                                type: 'providerConfig',
+                                providers: providers,
+                                selectedProvider: selectedProvider
+                            });
+                        } else {
+                            // No settings available yet
+                            this._view?.webview.postMessage({
+                                type: 'providerConfig',
+                                providers: ['default'],
+                                selectedProvider: 'default'
+                            });
+                        }
+                    }
                     break;
             }
         });
@@ -320,6 +399,13 @@ export class ChatProvider implements vscode.WebviewViewProvider {
                         ></textarea>
                         <button id="send-button" class="send-button">Send</button>
                         <button id="cancel-button" class="cancel-button" style="display: none;">Cancel</button>
+                    </div>
+                    <div class="provider-selector">
+                        <label for="provider-select">Provider:</label>
+                        <select id="provider-select">
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                        <button id="refresh-providers" class="refresh-button" title="Refresh providers">↻</button>
                     </div>
                 </div>
                 <script nonce="${nonce}" src="${scriptUri}"></script>

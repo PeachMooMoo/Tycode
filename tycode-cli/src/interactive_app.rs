@@ -3,12 +3,9 @@ use crate::event_handler::EventFormatter;
 use crate::formatter::Formatter;
 use anyhow::Result;
 use rustyline::DefaultEditor;
-use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::broadcast;
-use tycode_core::ai::provider::AiProvider;
-use tycode_core::ai::types::ModelSettings;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::settings::SettingsManager;
 
 pub struct InteractiveApp {
     base: BaseApp,
@@ -16,28 +13,13 @@ pub struct InteractiveApp {
 }
 
 impl InteractiveApp {
-    pub async fn new(
-        provider: Box<dyn AiProvider>,
-        tunings: ModelSettings,
-        workspace_roots: Option<Vec<std::path::PathBuf>>,
-        settings: Option<Arc<SettingsManager>>,
-    ) -> Result<Self> {
-        let base = BaseApp::new(provider, tunings, workspace_roots, settings).await?;
+    pub async fn new(workspace_roots: Option<Vec<PathBuf>>, settings_path: Option<PathBuf>) -> Result<Self> {
+        let base = BaseApp::new(workspace_roots, settings_path).await?;
         let formatter = Formatter::new();
 
-        // Display welcome message
-        let settings_info = if let Some(ref settings_mgr) = base.settings {
-            format!("📁 Settings: {}\n", settings_mgr.path().display())
-        } else {
-            String::new()
-        };
+        let welcome_message = "💡 Type /help for commands, /settings to view configuration, /quit to exit";
 
-        let welcome_message = format!(
-            "{}💡 Type /help for commands, /settings to view configuration, /quit to exit",
-            settings_info
-        );
-
-        formatter.print_system(&welcome_message);
+        formatter.print_system(welcome_message);
 
         Ok(Self { base, formatter })
     }
@@ -46,11 +28,10 @@ impl InteractiveApp {
         let mut rl = DefaultEditor::new()?;
 
         loop {
-            // Wait for user input
             let prompt = self.formatter.print_prompt();
             let line = match rl.readline(&prompt) {
                 Ok(line) => line,
-                Err(_) => break, // Ctrl-D or error
+                Err(_) => break,
             };
 
             let input = line.trim();
@@ -58,7 +39,6 @@ impl InteractiveApp {
                 continue;
             }
 
-            // Handle commands
             if input == "/quit" || input == "/exit" {
                 break;
             }
@@ -69,17 +49,12 @@ impl InteractiveApp {
             }
 
             if input == "/settings" {
-                self.print_settings();
+                self.print_settings().await;
                 continue;
             }
 
-            // Add to history
             rl.add_history_entry(&line)?;
-
-            // Send input to chat actor
             self.base.send_message(input.to_string()).await?;
-
-            // Process AI response - wait for it to complete
             self.wait_for_response().await?;
         }
 
@@ -91,7 +66,6 @@ impl InteractiveApp {
         loop {
             match self.base.event_rx.recv().await {
                 Ok(event) => {
-                    // Check if this completes the response
                     let is_complete = match &event {
                         ChatEvent::MessageAdded(message) => match message.sender {
                             MessageSender::Assistant if message.tool_calls.is_empty() => true,
@@ -102,7 +76,6 @@ impl InteractiveApp {
                         _ => false,
                     };
 
-                    // Format the event
                     self.format_event(event)?;
 
                     if is_complete {
@@ -126,13 +99,9 @@ impl InteractiveApp {
         self.formatter.print_system("📚 Available Commands:");
         self.formatter.print_system("");
 
-        // Get all available commands from the command handler
         let commands = self.base.command_handler.get_available_commands();
-
-        // Find the maximum command name length for alignment
         let max_name_len = commands.iter().map(|cmd| cmd.name.len()).max().unwrap_or(0);
 
-        // Display each command with aligned formatting
         for command in commands {
             let padding = " ".repeat(max_name_len - command.name.len());
             self.formatter.print_system(&format!(
@@ -154,74 +123,60 @@ impl InteractiveApp {
         self.formatter.print_divider();
     }
 
-    fn print_settings(&self) {
+    async fn print_settings(&mut self) {
         self.formatter.print_divider();
         self.formatter.print_system("📋 Current Settings:");
         self.formatter.print_system("");
 
-        if let Some(ref settings_mgr) = self.base.settings {
-            let settings = settings_mgr.settings();
-
-            // Global settings
-            self.formatter.print_system("  Global:");
-            self.formatter.print_system(&format!(
-                "    File API: {:?}",
-                settings.global.file_modification_api
-            ));
-            self.formatter
-                .print_system(&format!("    Trace: {}", settings.global.trace));
-            self.formatter.print_system("");
-
-            // Provider settings
-            self.formatter.print_system("  Providers:");
-            self.formatter.print_system("    Bedrock:");
-            if let Some(ref profile) = settings.providers.bedrock.profile {
-                self.formatter
-                    .print_system(&format!("      Profile: {}", profile));
-            } else {
-                self.formatter.print_system("      Profile: <default>");
+        // Get settings from the actor
+        let settings_json = match self.base.get_settings().await {
+            Ok(s) => s,
+            Err(e) => {
+                self.formatter.print_error(&format!("Failed to load settings: {}", e));
+                return;
             }
-            self.formatter.print_system("");
+        };
 
-            // Agent settings
-            if !settings.agents.is_empty() {
-                self.formatter.print_system("  Agent Overrides:");
-                for (agent_name, agent_settings) in &settings.agents {
-                    self.formatter.print_system(&format!("    {}:", agent_name));
+        let settings: tycode_core::settings::Settings = match serde_json::from_value(settings_json) {
+            Ok(s) => s,
+            Err(e) => {
+                self.formatter.print_error(&format!("Failed to parse settings: {}", e));
+                return;
+            }
+        };
 
-                    self.formatter
-                        .print_system(&format!("      Model: {}", agent_settings.model.name()));
+        self.formatter.print_system(&format!(
+            "  Active Provider: {}",
+            settings.active_provider
+        ));
+        self.formatter.print_system("");
 
-                    if let Some(temp) = agent_settings.temperature {
+        if !settings.providers.is_empty() {
+            self.formatter.print_system("  Configured Providers:");
+            for (name, config) in &settings.providers {
+                let is_active = name == &settings.active_provider;
+                let marker = if is_active { " (active)" } else { "" };
+                
+                self.formatter.print_system(&format!("    {}{}:", name, marker));
+                
+                match config {
+                    tycode_core::settings::ProviderConfig::Bedrock { profile, region } => {
+                        self.formatter.print_system("      Type: AWS Bedrock");
                         self.formatter
-                            .print_system(&format!("      Temperature: {}", temp));
-                    }
-                    if let Some(max_tokens) = agent_settings.max_tokens {
+                            .print_system(&format!("      Profile: {}", profile));
                         self.formatter
-                            .print_system(&format!("      Max Tokens: {}", max_tokens));
-                    }
-                    if let Some(reasoning_budget) = agent_settings.reasoning_budget {
-                        self.formatter
-                            .print_system(&format!("      Reasoning Budget: {}", reasoning_budget));
+                            .print_system(&format!("      Region: {}", region));
                     }
                 }
-            } else {
-                self.formatter
-                    .print_system("  No agent-specific overrides configured");
             }
-
-            self.formatter.print_system("");
-            self.formatter.print_system(&format!(
-                "  Settings file: {}",
-                settings_mgr.path().display()
-            ));
-            self.formatter
-                .print_system("  Edit the file directly to modify settings");
         } else {
-            self.formatter.print_system("  No settings file loaded");
             self.formatter
-                .print_system("  Using command-line arguments and defaults");
+                .print_system("  No providers configured (using defaults)");
         }
+
+        self.formatter.print_system("");
+        self.formatter
+            .print_system("  Use the VSCode extension to edit settings");
 
         self.formatter.print_divider();
     }
@@ -232,13 +187,11 @@ impl EventFormatter for InteractiveApp {
         match event {
             ChatEvent::MessageAdded(message) => match message.sender {
                 MessageSender::Assistant => {
-                    // Display reasoning first if present
                     if let Some(ref reasoning) = message.reasoning {
                         self.formatter
                             .print_system(&format!("💭 Reasoning: {}", reasoning.text));
                     }
 
-                    // Display the response with model info if available
                     if let Some(ref model_info) = message.model_info {
                         self.formatter
                             .print_ai_with_model(&message.content, model_info);
@@ -246,7 +199,6 @@ impl EventFormatter for InteractiveApp {
                         self.formatter.print_ai(&message.content);
                     }
 
-                    // Display tool calls if present
                     for tool_call in &message.tool_calls {
                         self.formatter
                             .print_tool_call(&tool_call.name, &tool_call.arguments);
@@ -258,13 +210,9 @@ impl EventFormatter for InteractiveApp {
                 MessageSender::Error => {
                     self.formatter.print_error(&message.content);
                 }
-                MessageSender::User => {
-                    // Skip printing user messages - they're already visible from input
-                }
+                MessageSender::User => {}
             },
-            ChatEvent::TypingStatusChanged(_) => {
-                // Ignore typing status - not useful
-            }
+            ChatEvent::TypingStatusChanged(_) => {}
             _ => {}
         }
         Ok(())

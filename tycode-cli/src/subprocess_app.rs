@@ -2,27 +2,22 @@ use crate::base_app::BaseApp;
 use crate::subprocess::SubprocessMessage;
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
-use std::sync::Arc;
-use tycode_core::ai::types::ModelSettings;
-use tycode_core::ai::AiProvider;
+use std::path::PathBuf;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::settings::SettingsManager;
 
 pub struct SubprocessApp {
     base: BaseApp,
 }
 
 impl SubprocessApp {
-    pub async fn new(
-        provider: Box<dyn AiProvider>,
-        tunings: ModelSettings,
-        workspace_roots: Option<Vec<std::path::PathBuf>>,
-        settings: Option<Arc<SettingsManager>>,
-    ) -> Result<Self> {
-        let base = BaseApp::new(provider, tunings, workspace_roots, settings).await?;
+    pub async fn new(workspace_roots: Option<Vec<PathBuf>>, settings_path: Option<PathBuf>) -> Result<Self> {
+        let base = BaseApp::new(workspace_roots, settings_path).await?;
 
-        // Send ready signal
-        let ready_msg = serde_json::to_string(&SubprocessMessage::Ready)?;
+        // Load initial settings through the actor
+        let settings_json = base.get_settings().await?;
+        let ready_msg = serde_json::to_string(&SubprocessMessage::Ready {
+            settings: settings_json,
+        })?;
         println!("{}", ready_msg);
         std::io::stdout().flush()?;
 
@@ -33,10 +28,8 @@ impl SubprocessApp {
         use std::sync::mpsc;
         use std::thread;
 
-        // Create a channel for stdin messages
         let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
 
-        // Spawn a blocking thread to read stdin
         thread::spawn(move || {
             let stdin = std::io::stdin();
             let reader = BufReader::new(stdin);
@@ -44,7 +37,7 @@ impl SubprocessApp {
                 match line {
                     Ok(line) => {
                         if stdin_tx.send(line).is_err() {
-                            break; // Receiver dropped
+                            break;
                         }
                     }
                     Err(_) => break,
@@ -52,7 +45,6 @@ impl SubprocessApp {
             }
         });
 
-        // Spawn task to handle events and send them to stdout
         let mut event_rx = self.base.subscribe_to_events();
         tokio::task::spawn_local(async move {
             while let Ok(event) = event_rx.recv().await {
@@ -62,9 +54,7 @@ impl SubprocessApp {
             }
         });
 
-        // Process messages from stdin
         loop {
-            // Check for stdin messages (non-blocking)
             match stdin_rx.try_recv() {
                 Ok(line) => {
                     let trimmed = line.trim();
@@ -72,19 +62,11 @@ impl SubprocessApp {
                         self.handle_stdin_message(trimmed).await?;
                     }
                 }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // No message available, continue
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    // Stdin reader thread ended
-                    break;
-                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => break,
             }
 
-            // Yield to allow event processing
             tokio::task::yield_now().await;
-
-            // Small delay to avoid busy-waiting
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
@@ -94,18 +76,44 @@ impl SubprocessApp {
     async fn handle_stdin_message(&mut self, line: &str) -> Result<()> {
         match serde_json::from_str::<SubprocessMessage>(line) {
             Ok(SubprocessMessage::Chat { message }) => {
-                // Send message to chat actor
                 self.base.send_message(message).await?;
             }
             Ok(SubprocessMessage::Cancel) => {
-                // Send cancel message to chat actor
                 self.base.cancel().await?;
             }
-            Ok(_) => {
-                // Ignore other message types (they're outgoing only)
+            Ok(SubprocessMessage::ChangeProvider { provider }) => {
+                self.base.change_provider(provider).await?;
             }
+            Ok(SubprocessMessage::LoadSettings) => {
+                // Just get current settings without reloading
+                // (reloading should be done explicitly via ReloadSettings message)
+                let settings_json = self.base.get_settings().await?;
+                let msg = serde_json::to_string(&SubprocessMessage::SettingsLoaded {
+                    settings: settings_json,
+                })?;
+                println!("{}", msg);
+                std::io::stdout().flush()?;
+            }
+            Ok(SubprocessMessage::SaveSettings { settings }) => {
+                let result = self.base.save_settings(settings).await;
+                let msg = match result {
+                    Ok(()) => serde_json::to_string(&SubprocessMessage::SettingsSaved {
+                        success: true,
+                        error: None,
+                    })?,
+                    Err(e) => serde_json::to_string(&SubprocessMessage::SettingsSaved {
+                        success: false,
+                        error: Some(format!("{:?}", e)),
+                    })?,
+                };
+                println!("{}", msg);
+                std::io::stdout().flush()?;
+            }
+            Ok(SubprocessMessage::ReloadSettings) => {
+                self.reload_settings().await?;
+            }
+            Ok(_) => {}
             Err(e) => {
-                // Send error response
                 let error_msg = serde_json::to_string(&SubprocessMessage::Error {
                     error: format!("Invalid message format: {}", e),
                 })?;
@@ -116,11 +124,18 @@ impl SubprocessApp {
         Ok(())
     }
 
+    async fn reload_settings(&mut self) -> Result<()> {
+        // Send a reload message to the chat actor
+        use tycode_core::chat::actor::ChatActorMessage;
+        self.base.actor.tx.send(ChatActorMessage::ReloadSettings)?;
+        
+        Ok(())
+    }
+
     fn format_to_json(event: ChatEvent) -> Result<()> {
         let message = match event {
             ChatEvent::MessageAdded(msg) => match msg.sender {
                 MessageSender::Assistant => {
-                    // Convert tool calls to our format
                     let tool_calls: Vec<crate::subprocess::ToolCall> = msg
                         .tool_calls
                         .iter()
@@ -130,7 +145,6 @@ impl SubprocessApp {
                         })
                         .collect();
 
-                    // Convert context info if present
                     let context_info =
                         msg.context_info
                             .as_ref()
@@ -146,7 +160,6 @@ impl SubprocessApp {
                                     .collect(),
                             });
 
-                    // Convert token usage if present
                     let token_usage =
                         msg.token_usage
                             .as_ref()
@@ -161,7 +174,7 @@ impl SubprocessApp {
                         reasoning: msg.reasoning.as_ref().map(|r| r.text.clone()),
                         tool_calls,
                         model: msg.model_info.as_ref().map(|m| m.model.name().to_string()),
-                        is_complete: msg.tool_calls.is_empty(), // Complete if no tool calls
+                        is_complete: msg.tool_calls.is_empty(),
                         context_info,
                         token_usage,
                     })
@@ -180,17 +193,10 @@ impl SubprocessApp {
                 ui_data,
                 error,
             } => {
-                eprintln!(
-                    "subprocess_app: Received ToolExecutionCompleted event: tool={}, success={}",
-                    tool_name, success
-                );
-                // Merge UI data into result if present
                 let combined_result = if let Some(ui) = ui_data {
-                    // If we have both result and ui_data, merge them
                     if let Some(mut res) = result {
                         if let serde_json::Value::Object(ref mut res_map) = res {
                             if let serde_json::Value::Object(ui_map) = ui {
-                                // Add ui_data fields to result
                                 for (key, value) in ui_map {
                                     res_map.insert(key, value);
                                 }
@@ -198,11 +204,9 @@ impl SubprocessApp {
                         }
                         Some(res)
                     } else {
-                        // If only ui_data, use it as the result
                         Some(ui)
                     }
                 } else {
-                    // No ui_data, just use result as-is
                     result
                 };
                 Some(SubprocessMessage::ToolResult {
@@ -212,7 +216,7 @@ impl SubprocessApp {
                     error,
                 })
             }
-            ChatEvent::TypingStatusChanged(_) => None, // Ignore typing status - not useful
+            ChatEvent::TypingStatusChanged(_) => None,
             ChatEvent::OperationCancelled { message } => Some(SubprocessMessage::Event {
                 event: "cancelled".to_string(),
                 data: serde_json::json!({ "message": message }),
@@ -235,19 +239,6 @@ impl SubprocessApp {
         };
 
         if let Some(msg) = message {
-            // Log what we're about to send
-            if let SubprocessMessage::ToolResult {
-                ref tool_name,
-                ref success,
-                ..
-            } = msg
-            {
-                eprintln!(
-                    "subprocess_app: Sending ToolResult to stdout: tool={}, success={}",
-                    tool_name, success
-                );
-            }
-
             let json = serde_json::to_string(&msg)?;
             println!("{}", json);
             std::io::stdout().flush()?;

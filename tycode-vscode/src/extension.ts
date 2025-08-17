@@ -1,12 +1,16 @@
 import * as vscode from 'vscode';
 import { MainProvider } from './mainProvider';
+import { SettingsProvider } from './settingsProvider';
+import { SubprocessBridge } from './subprocessBridge';
 
 let mainProvider: MainProvider;
+let settingsProvider: SettingsProvider;
+let settingsBridge: SubprocessBridge;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('TyCode extension is activating...');
 
-    // Create main provider
+    // Create providers
     mainProvider = new MainProvider(context);
 
     // Register webview provider
@@ -70,11 +74,32 @@ export async function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Register settings command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('tycode.openSettings', async () => {
+            // Create a settings bridge on demand
+            if (!settingsBridge) {
+                const workspaceRoots = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+                
+                settingsBridge = new SubprocessBridge(context, workspaceRoots);
+                await settingsBridge.initialize();
+                settingsProvider = new SettingsProvider(context, settingsBridge);
+            }
+            settingsProvider.show();
+        })
+    );
+
     console.log('TyCode extension is now active!');
 }
 
 export function deactivate() {
     if (mainProvider) {
         mainProvider.dispose();
+    }
+    if (settingsProvider) {
+        settingsProvider.dispose();
+    }
+    if (settingsBridge) {
+        settingsBridge.dispose();
     }
 }

@@ -10,3 +10,4 @@ yarn-error.log*
 .DS_Store
 /binaries/
 src/build-info.ts
+package-lock.json

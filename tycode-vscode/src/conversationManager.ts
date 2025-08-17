@@ -5,14 +5,28 @@ import * as vscode from 'vscode';
 export class ConversationManager extends EventEmitter {
     private conversations: Map<string, Conversation> = new Map();
     private activeConversationId: string | null = null;
+    private availableProviders: { [name: string]: any } = {};
+    private defaultProvider: string | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
         super();
+        // Provider settings will be loaded from subprocess when needed
+        this.availableProviders = {};
+        this.defaultProvider = null;  // Don't hardcode - get from settings
     }
 
-    async createConversation(title?: string): Promise<Conversation> {
+    getAvailableProviders(): string[] {
+        return Object.keys(this.availableProviders);
+    }
+
+    getDefaultProvider(): string | null {
+        return this.defaultProvider;
+    }
+
+    async createConversation(title?: string, selectedProvider?: string): Promise<Conversation> {
         const id = this.generateId();
-        const conversation = new Conversation(this.context, id, title);
+        // Don't default to anything - let the subprocess use its settings
+        const conversation = new Conversation(this.context, id, title, selectedProvider);
         
         await conversation.initialize();
         
@@ -42,6 +56,14 @@ export class ConversationManager extends EventEmitter {
 
         conversation.on('titleChanged', (newTitle) => {
             this.emit('conversationTitleChanged', id, newTitle);
+        });
+
+        conversation.on('providerChanged', (provider) => {
+            this.emit('conversationProviderChanged', id, provider);
+        });
+
+        conversation.on('providerSwitched', (oldProvider, newProvider) => {
+            this.emit('conversationProviderSwitched', id, oldProvider, newProvider);
         });
 
         conversation.on('disconnected', () => {
@@ -107,6 +129,8 @@ export class ConversationManager extends EventEmitter {
     private generateId(): string {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
+
+    
 
     dispose(): void {
         this.closeAllConversations();

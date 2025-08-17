@@ -11,9 +11,16 @@ interface SubprocessMessage {
 export class SubprocessBridge extends EventEmitter {
     private child: ChildProcess | null = null;
     private buffer: string = '';
+    private workspaceRoots?: string[];
+    private settings?: any;
 
-    constructor(private context: vscode.ExtensionContext) {
+    constructor(private context: vscode.ExtensionContext, workspaceRoots?: string[]) {
         super();
+        this.workspaceRoots = workspaceRoots;
+    }
+
+    getSettings(): any {
+        return this.settings;
     }
 
     async initialize(): Promise<void> {
@@ -23,10 +30,6 @@ export class SubprocessBridge extends EventEmitter {
 
         // Get the path to tycode binary
         const cliPath = this.getBinaryPath();
-
-        // Get AWS profile from settings
-        const config = vscode.workspace.getConfiguration('tycode');
-        const awsProfile = config.get<string>('awsProfile') || 'cline';
 
         // Check if the binary exists
         const fs = require('fs');
@@ -55,7 +58,7 @@ export class SubprocessBridge extends EventEmitter {
         console.log('Workspace roots:', workspaceRoots);
 
         // Build command arguments
-        const args = ['--subprocess', '--profile', awsProfile];
+        const args = ['--subprocess'];
         
         // Add workspace roots if we have multiple
         if (workspaceRoots.length > 0) {
@@ -65,7 +68,8 @@ export class SubprocessBridge extends EventEmitter {
         // Spawn the subprocess with the workspace folders
         this.child = spawn(cliPath, args, {
             stdio: ['pipe', 'pipe', 'pipe'],
-            cwd: cwd
+            cwd: cwd,
+            env: process.env
         });
 
         // Handle stdout (messages from CLI)
@@ -110,7 +114,8 @@ export class SubprocessBridge extends EventEmitter {
                 if (message.type === 'Ready') {
                     clearTimeout(timeout);
                     this.off('message', readyHandler);
-                    console.log('Subprocess bridge initialized successfully');
+                    this.settings = message.settings;
+                    console.log('Subprocess bridge initialized successfully with settings:', this.settings);
                     resolve();
                 }
             };
@@ -142,6 +147,103 @@ export class SubprocessBridge extends EventEmitter {
         };
 
         this.child.stdin.write(JSON.stringify(msg) + '\n');
+    }
+
+    async changeProvider(provider: string): Promise<void> {
+        if (!this.child || !this.child.stdin) {
+            throw new Error('Subprocess not initialized');
+        }
+
+        const msg: SubprocessMessage = {
+            type: 'ChangeProvider',
+            provider
+        };
+
+        this.child.stdin.write(JSON.stringify(msg) + '\n');
+    }
+
+    async loadSettings(): Promise<any> {
+        if (!this.child || !this.child.stdin) {
+            throw new Error('Subprocess not initialized');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Settings load timeout'));
+            }, 5000);
+
+            const settingsHandler = (message: SubprocessMessage) => {
+                if (message.type === 'SettingsLoaded') {
+                    clearTimeout(timeout);
+                    this.off('message', settingsHandler);
+                    this.settings = message.settings; // Update cached settings
+                    resolve(message.settings);
+                }
+            };
+
+            this.on('message', settingsHandler);
+
+            const msg: SubprocessMessage = {
+                type: 'LoadSettings'
+            };
+
+            this.child!.stdin!.write(JSON.stringify(msg) + '\n');
+        });
+    }
+
+    async reloadSettings(): Promise<void> {
+        if (!this.child || !this.child.stdin) {
+            throw new Error('Subprocess not initialized');
+        }
+
+        // First, send reload message to chat actor to reload settings from disk
+        const msg: SubprocessMessage = {
+            type: 'ReloadSettings'
+        };
+        this.child.stdin.write(JSON.stringify(msg) + '\n');
+
+        // Wait a bit for the reload to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Now load the fresh settings and update cache
+        const settings = await this.loadSettings();
+        this.settings = settings;
+        
+        // Emit an event so all ChatProviders can update their UI
+        this.emit('settingsReloaded', settings);
+    }
+
+    async saveSettings(settings: any): Promise<void> {
+        if (!this.child || !this.child.stdin) {
+            throw new Error('Subprocess not initialized');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Settings save timeout'));
+            }, 5000);
+
+            const saveHandler = (message: SubprocessMessage) => {
+                if (message.type === 'SettingsSaved') {
+                    clearTimeout(timeout);
+                    this.off('message', saveHandler);
+                    if (message.success) {
+                        resolve();
+                    } else {
+                        reject(new Error(message.error || 'Failed to save settings'));
+                    }
+                }
+            };
+
+            this.on('message', saveHandler);
+
+            const msg: SubprocessMessage = {
+                type: 'SaveSettings',
+                settings
+            };
+
+            this.child!.stdin!.write(JSON.stringify(msg) + '\n');
+        });
     }
 
     private handleMessage(message: SubprocessMessage) {

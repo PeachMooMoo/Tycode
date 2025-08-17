@@ -34,6 +34,11 @@
       {
         "command": "tycode.applyChanges",
         "title": "TyCode: Apply Suggested Changes"
+      },
+      {
+        "command": "tycode.openSettings",
+        "title": "TyCode: Open Settings",
+        "icon": "$(settings-gear)"
       }
     ],
     "viewsContainers": {
@@ -62,33 +67,14 @@
           "when": "editorHasSelection",
           "group": "tycode"
         }
-      ]
-    },
-    "configuration": {
-      "title": "TyCode",
-      "properties": {
-        "tycode.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for AI service",
-          "scope": "application"
-        },
-        "tycode.model": {
-          "type": "string",
-          "default": "claude-3-5-sonnet-20241022",
-          "description": "AI model to use",
-          "enum": [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229"
-          ]
-        },
-        "tycode.maxTokens": {
-          "type": "number",
-          "default": 4096,
-          "description": "Maximum tokens for AI responses"
+      ],
+      "view/title": [
+        {
+          "command": "tycode.openSettings",
+          "when": "view == tycode.chatView",
+          "group": "navigation"
         }
-      }
+      ]
     }
   },
   "scripts": {

@@ -1,9 +1,6 @@
 use anyhow::Result;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::sync::broadcast;
-use tycode_core::ai::provider::AiProvider;
-use tycode_core::ai::types::ModelSettings;
 use tycode_core::chat::{
     actor::ChatActor, commands::CommandHandler, events::ChatEvent, state::SharedChatState,
 };
@@ -13,26 +10,21 @@ pub struct BaseApp {
     pub actor: ChatActor,
     pub event_rx: broadcast::Receiver<ChatEvent>,
     pub command_handler: CommandHandler,
-    pub settings: Option<Arc<SettingsManager>>,
     chat_state: SharedChatState,
 }
 
 impl BaseApp {
-    pub async fn new(
-        provider: Box<dyn AiProvider>,
-        _tunings: ModelSettings,
-        workspace_roots: Option<Vec<PathBuf>>,
-        settings: Option<Arc<SettingsManager>>,
-    ) -> Result<Self> {
+    pub async fn new(workspace_roots: Option<Vec<PathBuf>>, settings_path: Option<PathBuf>) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
         let chat_state = SharedChatState::new();
 
-        let actor = ChatActor::launch(
-            chat_state.clone(),
-            provider,
-            workspace_roots,
-            settings.clone(),
-        );
+        // Create a new SettingsManager instance for the actor to own
+        let actor_settings = if let Some(path) = settings_path {
+            SettingsManager::from_path(path)?
+        } else {
+            SettingsManager::new()?
+        };
+        let actor = ChatActor::launch(chat_state.clone(), workspace_roots, actor_settings);
 
         let event_rx = chat_state.subscribe();
         let command_handler = CommandHandler::new(chat_state.clone());
@@ -41,7 +33,6 @@ impl BaseApp {
             actor,
             event_rx,
             command_handler,
-            settings,
             chat_state,
         })
     }
@@ -56,5 +47,26 @@ impl BaseApp {
 
     pub async fn cancel(&self) -> Result<()> {
         self.actor.cancel().await
+    }
+
+    pub async fn change_provider(&self, provider: String) -> Result<()> {
+        self.actor.change_provider(provider).await
+    }
+
+    pub async fn get_settings(&self) -> Result<serde_json::Value> {
+        use tycode_core::chat::actor::ChatActorMessage;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.actor.tx.send(ChatActorMessage::GetSettings(tx))?;
+        rx.await?
+    }
+
+    pub async fn save_settings(&self, settings: serde_json::Value) -> Result<()> {
+        use tycode_core::chat::actor::ChatActorMessage;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.actor.tx.send(ChatActorMessage::SaveSettings {
+            settings,
+            response: tx,
+        })?;
+        rx.await?
     }
 }

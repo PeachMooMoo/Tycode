@@ -17,7 +17,7 @@ use crate::settings::SettingsManager;
 use crate::tools::context_utils::list_relevant_files;
 use crate::tools::file_access::FileAccessManager;
 use crate::tools::registry::ToolRegistry;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +30,13 @@ pub enum ChatActorMessage {
     UserInput(String),
     ProcessCommand(String),
     ContinueConversation,
+    ChangeProvider(String),
+    ReloadSettings,
+    GetSettings(tokio::sync::oneshot::Sender<Result<serde_json::Value>>),
+    SaveSettings {
+        settings: serde_json::Value,
+        response: tokio::sync::oneshot::Sender<Result<()>>,
+    },
 }
 
 /// Handle to interact with the chat actor
@@ -44,7 +51,7 @@ struct ActorState {
     provider: Box<dyn AiProvider>,
     agent_stack: Vec<ActiveAgent>,
     command_handler: CommandHandler,
-    settings: Option<Arc<SettingsManager>>,
+    settings: SettingsManager,
     workspace_roots: Vec<PathBuf>,
 }
 
@@ -52,23 +59,32 @@ impl ChatActor {
     /// Launch the chat actor and return a handle to it
     pub fn launch(
         state: SharedChatState,
-        provider: Box<dyn AiProvider>,
         workspace_roots: Vec<PathBuf>,
-        settings: Option<Arc<SettingsManager>>,
+        settings: SettingsManager,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
 
-        let actor_state = ActorState {
-            state: state.clone(),
-            provider,
-            agent_stack: vec![ActiveAgent::new(Box::new(SoftwareEngineerAgent))],
-            command_handler: CommandHandler::new(state),
-            settings,
-            workspace_roots,
-        };
-
         tokio::task::spawn_local(async move {
+            let provider = match create_provider_from_settings(&settings).await {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Failed to initialize provider: {}", e);
+                    // Don't just return - we need to keep the actor running
+                    // This error will be handled when trying to send messages
+                    return;
+                }
+            };
+
+            let actor_state = ActorState {
+                state: state.clone(),
+                provider,
+                agent_stack: vec![ActiveAgent::new(Box::new(SoftwareEngineerAgent))],
+                command_handler: CommandHandler::new(state),
+                settings,
+                workspace_roots,
+            };
+
             run_actor(actor_state, rx, cancel_rx).await;
         });
 
@@ -83,6 +99,42 @@ impl ChatActor {
     pub async fn cancel(&self) -> Result<()> {
         self.cancel_tx.send(())?;
         Ok(())
+    }
+
+    pub async fn change_provider(&self, provider: String) -> Result<()> {
+        self.tx.send(ChatActorMessage::ChangeProvider(provider))?;
+        Ok(())
+    }
+}
+
+async fn create_provider_from_settings(settings: &SettingsManager) -> Result<Box<dyn AiProvider>> {
+    let config = settings.settings();
+
+    if let Some(provider_config) = config.active_provider() {
+        match provider_config {
+            crate::settings::ProviderConfig::Bedrock { profile, region } => {
+                use crate::ai::bedrock::BedrockProvider;
+                use aws_config::retry::RetryConfig;
+                use aws_config::Region;
+
+                // Ensure region is not empty, use default if needed
+                if region.is_empty() {
+                    bail!("AWS region is empty")
+                };
+
+                let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                    .profile_name(profile)
+                    .region(Region::new(region.to_string()))
+                    .retry_config(RetryConfig::disabled())
+                    .load()
+                    .await;
+
+                let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
+                Ok(Box::new(BedrockProvider::new(client)))
+            }
+        }
+    } else {
+        Err(anyhow::anyhow!("No active provider configured in settings"))
     }
 }
 
@@ -137,6 +189,24 @@ async fn process_message(state: &mut ActorState, message: ChatActorMessage) -> R
             Ok(())
         }
         ChatActorMessage::ContinueConversation => send_ai_request(state).await,
+        ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
+        ChatActorMessage::ReloadSettings => handle_settings_reload(state).await,
+        ChatActorMessage::GetSettings(response) => {
+            let settings = state.settings.settings();
+            let settings_json = serde_json::to_value(settings)?;
+            let _ = response.send(Ok(settings_json));
+            Ok(())
+        }
+        ChatActorMessage::SaveSettings { settings, response } => {
+            use crate::settings::Settings;
+            let result: Result<()> = (|| {
+                let settings_obj: Settings = serde_json::from_value(settings)?;
+                state.settings.save_settings(settings_obj)?;
+                Ok(())
+            })();
+            let _ = response.send(result);
+            Ok(())
+        }
     }
 }
 
@@ -414,6 +484,64 @@ async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     Ok(())
 }
 
+async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
+    info!("Reloading settings from disk");
+    
+    // Reload settings from disk
+    state.settings.reload()?;
+    
+    // Check if the active provider has changed and update if needed
+    let settings = state.settings.settings();
+    let active_provider = &settings.active_provider;
+    
+    // Only recreate provider if it's different from current
+    // This is a bit tricky since we can't easily compare providers
+    // For now, we'll recreate the provider to ensure it's up to date
+    if let Some(provider_config) = settings.providers.get(active_provider) {
+        match provider_config {
+            crate::settings::ProviderConfig::Bedrock { profile, region } => {
+                use crate::ai::bedrock::BedrockProvider;
+                use aws_config::retry::RetryConfig;
+
+                // Ensure region is not empty, use default if needed
+                let region_str = if region.is_empty() {
+                    "us-west-2"
+                } else {
+                    region.as_str()
+                };
+
+                let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                    .profile_name(profile)
+                    .region(aws_config::Region::new(region_str.to_string()))
+                    .retry_config(RetryConfig::disabled())
+                    .load()
+                    .await;
+
+                let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
+                state.provider = Box::new(BedrockProvider::new(client));
+                
+                info!("Reloaded provider configuration for: {}", active_provider);
+            }
+        }
+    }
+    
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: "Settings reloaded successfully.".to_string(),
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
+    
+    Ok(())
+}
+
 // Helper functions
 fn current_agent(state: &ActorState) -> &ActiveAgent {
     state.agent_stack.last().expect("No active agent")
@@ -444,26 +572,11 @@ fn add_error_message(state: &SharedChatState, error: String) {
 }
 
 fn determine_model_settings_and_source(
-    state: &ActorState,
+    _state: &ActorState,
     agent: &ActiveAgent,
 ) -> (ModelSettings, ModelSource) {
-    let agent_name = agent.agent.name();
-
-    if let Some(settings) = &state.settings {
-        if let Some(agent_settings) = settings.settings().get_agent_settings(agent_name) {
-            return (
-                ModelSettings {
-                    model: agent_settings.model,
-                    max_tokens: agent_settings.max_tokens,
-                    temperature: agent_settings.temperature,
-                    top_p: agent_settings.top_p,
-                    reasoning_budget: agent_settings.reasoning_budget,
-                },
-                ModelSource::UserConfigured,
-            );
-        }
-    }
-
+    // For now, we just use the agent's preferred model
+    // In the future, we could allow model configuration per provider
     (agent.agent.preferred_model(), ModelSource::AgentPreference)
 }
 
@@ -555,4 +668,62 @@ fn emit_retry_event(
     if let Err(e) = state.state.event_tx.send(retry_event) {
         error!("Failed to send retry event: {:?}", e);
     }
+}
+
+async fn handle_provider_change(state: &mut ActorState, provider_name: String) -> Result<()> {
+    info!("Changing provider to: {}", provider_name);
+
+    // Reload settings from disk to get latest configuration
+    state.settings.reload()?;
+
+    let settings = state.settings.settings();
+
+    let Some(provider_config) = settings.providers.get(&provider_name) else {
+        bail!("Provider name: {provider_name} not found in settings");
+    };
+
+    match provider_config {
+        crate::settings::ProviderConfig::Bedrock { profile, region } => {
+            use crate::ai::bedrock::BedrockProvider;
+            use aws_config::retry::RetryConfig;
+            use aws_sdk_bedrockruntime::Client as BedrockClient;
+
+            // Ensure region is not empty, use default if needed
+            let region_str = if region.is_empty() {
+                "us-west-2"
+            } else {
+                region.as_str()
+            };
+
+            let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .profile_name(profile)
+                .region(aws_config::Region::new(region_str.to_string()))
+                .retry_config(RetryConfig::disabled())
+                .load()
+                .await;
+
+            let client = BedrockClient::new(&aws_config);
+            let provider = BedrockProvider::new(client);
+            state.provider = Box::new(provider);
+
+            add_message(
+                &state.state,
+                ChatMessage {
+                    content: format!(
+                        "Switched to provider: {} (AWS profile: {})",
+                        provider_name, profile
+                    ),
+                    sender: MessageSender::System,
+                    timestamp: Instant::now(),
+                    reasoning: None,
+                    tool_calls: Vec::new(),
+                    model_info: None,
+                    context_info: None,
+                    token_usage: None,
+                },
+            );
+        }
+    }
+
+    Ok(())
 }

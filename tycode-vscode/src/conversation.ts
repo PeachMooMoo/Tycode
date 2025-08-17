@@ -13,23 +13,26 @@ export interface ConversationMessage {
 }
 
 export class Conversation extends EventEmitter {
-    private bridge: SubprocessBridge;
+    public bridge: SubprocessBridge;
     private _id: string;
     private _title: string;
     private _messages: ConversationMessage[] = [];
     private _isActive: boolean = false;
     private _isManuallyNamed: boolean = false;
     private _hasFirstMessage: boolean = false;
+    private _selectedProvider: string | undefined;
 
     constructor(
         private context: vscode.ExtensionContext,
         id: string,
-        title?: string
+        title?: string,
+        selectedProvider?: string
     ) {
         super();
         this._id = id;
         this._title = title || 'New Chat';
         this._isManuallyNamed = !!title;
+        this._selectedProvider = selectedProvider;
         this.bridge = new SubprocessBridge(context);
     }
 
@@ -55,10 +58,23 @@ export class Conversation extends EventEmitter {
         return this._isActive;
     }
 
+    get selectedProvider(): string | undefined {
+        return this._selectedProvider;
+    }
+
+    set selectedProvider(provider: string | undefined) {
+        if (this._selectedProvider !== provider) {
+            this._selectedProvider = provider;
+            this.emit('providerChanged', provider);
+        }
+    }
+
     async initialize(): Promise<void> {
         await this.bridge.initialize();
         this._isActive = true;
 
+        // Don't send provider change on init - let subprocess use its settings
+        
         // Set up event listeners
         this.bridge.on('response', (response: any) => {
             const message: ConversationMessage = {
@@ -138,7 +154,7 @@ export class Conversation extends EventEmitter {
             }
         }
 
-        // Send to subprocess
+        // Send to subprocess with selected provider
         await this.bridge.sendMessage(content);
     }
 
@@ -191,6 +207,27 @@ export class Conversation extends EventEmitter {
     clearMessages(): void {
         this._messages = [];
         this.emit('cleared');
+    }
+
+    async switchProvider(provider: string): Promise<void> {
+        if (this._selectedProvider === provider) {
+            return; // No change needed
+        }
+
+        // Store old provider
+        const oldProvider = this._selectedProvider;
+        this._selectedProvider = provider;
+
+        // Send cancel first to stop any ongoing processing
+        await this.bridge.sendCancel();
+        
+        // Then send provider change message to the subprocess
+        await this.bridge.changeProvider(provider);
+
+        // Emit event
+        this.emit('providerSwitched', oldProvider, provider);
+
+        
     }
 
     dispose(): void {

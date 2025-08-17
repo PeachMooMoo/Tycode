@@ -296,7 +296,8 @@ impl AiProvider for BedrockProvider {
         let response = converse_request.send().await.map_err(|e| {
             tracing::warn!(?e, "Bedrock converse failed");
 
-            match e.into_service_error() {
+            let e = e.into_service_error();
+            match e {
                 ConverseError::ThrottlingException(e) => AiError::Retryable(anyhow::anyhow!(e)),
                 ConverseError::ServiceUnavailableException(e) => {
                     AiError::Retryable(anyhow::anyhow!(e))
@@ -311,7 +312,7 @@ impl AiProvider for BedrockProvider {
                 ConverseError::ModelErrorException(e) => AiError::Terminal(anyhow::anyhow!(e)),
                 ConverseError::ModelNotReadyException(e) => AiError::Terminal(anyhow::anyhow!(e)),
                 ConverseError::ValidationException(e) => AiError::Terminal(anyhow::anyhow!(e)),
-                _ => AiError::Terminal(anyhow::anyhow!("Unknown error from bedrock")),
+                _ => AiError::Terminal(anyhow::anyhow!("Unknown error from bedrock: {e:?}")),
             }
         })?;
 

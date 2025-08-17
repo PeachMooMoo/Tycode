@@ -37,7 +37,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 id: conversation.id,
                 title: conversation.title
             });
-        });
+            
+            });
 
         this.conversationManager.on('conversationUpdate', (id: string, updateType: string, message: ConversationMessage) => {
             // Handle tool results separately
@@ -178,6 +179,17 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'cancel':
                     await this.handleCancel(data.conversationId);
                     break;
+                case 'switchProvider':
+                    await this.handleSwitchProvider(data.conversationId, data.provider);
+                    break;
+                case 'getProviders':
+                    // Just get cached providers, no reload
+                    this.handleGetCachedProviders(data.conversationId);
+                    break;
+                case 'refreshProviders':
+                    // Force reload from disk
+                    await this.handleRefreshProviders(data.conversationId);
+                    break;
             }
         });
 
@@ -185,7 +197,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
         this.sendInitialState();
     }
 
-    private sendInitialState(): void {
+    private async sendInitialState(): Promise<void> {
         const conversations = this.conversationManager.getAllConversations();
         const activeConversation = this.conversationManager.getActiveConversation();
 
@@ -194,10 +206,29 @@ export class MainProvider implements vscode.WebviewViewProvider {
             conversations: conversations.map(c => ({
                 id: c.id,
                 title: c.title,
-                messages: c.messages
+                messages: c.messages,
+                selectedProvider: c.selectedProvider
             })),
             activeConversationId: activeConversation?.id || null
         });
+
+        // On initial load, just get cached settings without reloading from disk
+        for (const c of conversations) {
+            if (c.bridge) {
+                const settings = c.bridge.getSettings();
+                if (settings) {
+                    const providers = Object.keys(settings.providers || {});
+                    const selectedProvider = settings.active_provider;
+                    
+                    this.sendToWebview({
+                        type: 'providerConfig',
+                        conversationId: c.id,
+                        providers,
+                        selectedProvider
+                    });
+                }
+            }
+        }
     }
 
     private async handleNewChat(): Promise<void> {
@@ -214,7 +245,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleOpenSettings(): Promise<void> {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'tycode');
+        await vscode.commands.executeCommand('tycode.openSettings');
     }
 
     private async handleSendMessage(conversationId: string, message: string): Promise<void> {
@@ -287,6 +318,91 @@ export class MainProvider implements vscode.WebviewViewProvider {
         } catch (error) {
             console.error('[MainProvider] Failed to cancel:', error);
         }
+    }
+
+    private async handleSwitchProvider(conversationId: string, provider: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        try {
+            await conversation.switchProvider(provider);
+            
+            this.sendToWebview({
+                type: 'providerSwitched',
+                conversationId,
+                newProvider: provider
+            });
+        } catch (error) {
+            console.error('[MainProvider] Failed to switch provider:', error);
+            vscode.window.showErrorMessage(`Failed to switch provider: ${error}`);
+        }
+    }
+
+    private handleGetCachedProviders(conversationId: string): void {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        
+        // Just get cached settings, no reload
+        if (conversation && conversation.bridge) {
+            const settings = conversation.bridge.getSettings();
+            if (settings) {
+                const providers = Object.keys(settings.providers || {});
+                const selectedProvider = settings.active_provider;
+                
+                this.sendToWebview({
+                    type: 'providerConfig',
+                    conversationId,
+                    providers,
+                    selectedProvider
+                });
+                return;
+            }
+        }
+        
+        // No settings available yet - send empty response
+        this.sendToWebview({
+            type: 'providerConfig',
+            conversationId,
+            providers: [],
+            selectedProvider: null
+        });
+    }
+
+    private async handleRefreshProviders(conversationId: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        
+        if (conversation && conversation.bridge) {
+            try {
+                // Force reload settings from disk to get the latest
+                await conversation.bridge.reloadSettings();
+                
+                // Now get the fresh settings from cache
+                const settings = conversation.bridge.getSettings();
+                if (settings) {
+                    const providers = Object.keys(settings.providers || {});
+                    const selectedProvider = settings.active_provider;
+                    
+                    this.sendToWebview({
+                        type: 'providerConfig',
+                        conversationId,
+                        providers,
+                        selectedProvider
+                    });
+                    return;
+                }
+            } catch (error) {
+                console.error('[MainProvider] Failed to reload providers:', error);
+            }
+        }
+        
+        // No settings available yet or error occurred - send empty response
+        this.sendToWebview({
+            type: 'providerConfig',
+            conversationId,
+            providers: [],
+            selectedProvider: null
+        });
     }
 
     private async insertCodeInEditor(code: string): Promise<void> {
@@ -453,6 +569,16 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         <!-- Conversation views will be dynamically added here -->
                     </div>
                 </div>
+                <!-- Provider selector template (will be cloned for each conversation) -->
+                <template id="provider-selector-template">
+                    <div class="provider-selector">
+                        <label for="provider-select">Provider:</label>
+                        <select class="provider-select">
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                        <button class="refresh-providers" title="Refresh providers">↻</button>
+                    </div>
+                </template>
                 <script nonce="${nonce}" src="${scriptUri}"></script>
             </body>
             </html>`;

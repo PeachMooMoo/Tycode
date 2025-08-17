@@ -7,6 +7,8 @@
     const cancelButton = document.getElementById('cancel-button');
     const clearButton = document.getElementById('clear-chat');
     const typingIndicator = document.getElementById('typing-indicator');
+    const providerSelect = document.getElementById('provider-select');
+    const refreshProvidersBtn = document.getElementById('refresh-providers');
     
     // Track if we're currently processing
     let isProcessing = false;
@@ -29,6 +31,40 @@
             }
         }
     });
+
+    // Handle provider selection change
+    if (providerSelect) {
+        providerSelect.addEventListener('change', (e) => {
+            const selectedProvider = e.target.value;
+            vscode.postMessage({
+                type: 'switchProvider',
+                provider: selectedProvider
+            });
+        });
+        
+        // Refresh provider list when dropdown is focused/clicked
+        providerSelect.addEventListener('focus', () => {
+            vscode.postMessage({
+                type: 'getProviders'
+            });
+        });
+        
+        // Also refresh on click in case user clicks without focusing first
+        providerSelect.addEventListener('click', () => {
+            vscode.postMessage({
+                type: 'getProviders'
+            });
+        });
+    }
+
+    // Handle refresh providers button
+    if (refreshProvidersBtn) {
+        refreshProvidersBtn.addEventListener('click', () => {
+            vscode.postMessage({
+                type: 'getProviders'
+            });
+        });
+    }
 
     // Clear chat
     clearButton.addEventListener('click', () => {
@@ -551,8 +587,55 @@
                 hideCancelButton();
                 displayMessage('system', message.content || 'Operation cancelled');
                 break;
+            case 'providerConfig':
+                updateProviderOptions(message.providers, message.selectedProvider);
+                break;
+            case 'providerSwitched':
+                // Update the select element if needed
+                if (providerSelect && message.newProvider) {
+                    providerSelect.value = message.newProvider;
+                }
+                break;
         }
     });
+
+    // Function to update provider options
+    function updateProviderOptions(providers, selectedProvider) {
+        if (!providerSelect) {
+            return;
+        }
+
+        // Store current selection before clearing
+        const currentValue = providerSelect.value;
+
+        // Clear existing options
+        providerSelect.innerHTML = '';
+
+        // Add provider options
+        providers.forEach(provider => {
+            const option = document.createElement('option');
+            option.value = provider;
+            option.textContent = provider;
+            if (provider === selectedProvider) {
+                option.selected = true;
+            }
+            providerSelect.appendChild(option);
+        });
+
+        // If no providers, add a default option
+        if (providers.length === 0) {
+            const option = document.createElement('option');
+            option.value = 'default';
+            option.textContent = 'default';
+            option.selected = true;
+            providerSelect.appendChild(option);
+        }
+
+        // If the selected provider changed, make sure to update the value
+        if (providerSelect.value !== selectedProvider && providers.includes(selectedProvider)) {
+            providerSelect.value = selectedProvider;
+        }
+    }
 
     // Auto-resize textarea
     messageInput.addEventListener('input', () => {
@@ -562,4 +645,7 @@
 
     // Focus input on load
     messageInput.focus();
+
+    // Request initial provider configuration
+    vscode.postMessage({ type: 'getProviders' });
 })();

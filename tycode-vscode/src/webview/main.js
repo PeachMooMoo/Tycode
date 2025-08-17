@@ -62,8 +62,62 @@
             case 'toolResult':
                 handleToolResult(message);
                 break;
+            case 'providerConfig':
+                handleProviderConfig(message);
+                break;
+            case 'providerSwitched':
+                handleProviderSwitched(message);
+                break;
         }
     });
+
+    function handleProviderConfig(message) {
+        const { conversationId, providers, selectedProvider } = message;
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return;
+
+        const providerSelect = conversation.viewElement.querySelector('.provider-select');
+        if (!providerSelect) return;
+
+        // Clear existing options
+        providerSelect.innerHTML = '';
+
+        // Add provider options
+        if (providers && providers.length > 0) {
+            providers.forEach(provider => {
+                const option = document.createElement('option');
+                option.value = provider;
+                option.textContent = provider;
+                if (provider === selectedProvider) {
+                    option.selected = true;
+                }
+                providerSelect.appendChild(option);
+            });
+        } else {
+            // Default option if no providers
+            const option = document.createElement('option');
+            option.value = 'default';
+            option.textContent = 'default';
+            option.selected = true;
+            providerSelect.appendChild(option);
+        }
+
+        // Store selected provider
+        conversation.selectedProvider = selectedProvider;
+    }
+
+    function handleProviderSwitched(message) {
+        const { conversationId, newProvider } = message;
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return;
+
+        const providerSelect = conversation.viewElement.querySelector('.provider-select');
+        if (providerSelect && newProvider) {
+            providerSelect.value = newProvider;
+        }
+
+        conversation.selectedProvider = newProvider;
+    }
 
     function handleInitialState(message) {
         // Clear existing state
@@ -163,6 +217,7 @@
         conversationView.className = 'conversation-view';
         conversationView.dataset.conversationId = id;
         conversationView.style.display = 'none';
+        // Clear any previous content and rebuild with provider selector
         conversationView.innerHTML = `
             <div class="chat-header">
                 <h3>${escapeHtml(title)}</h3>
@@ -179,6 +234,13 @@
                 <button class="send-button">Send</button>
                 <button class="cancel-button" style="display: none;">Cancel</button>
             </div>
+            <div class="provider-selector" style="display: flex !important; align-items: center; gap: 10px; padding: 8px 16px; background-color: var(--vscode-input-background, #1e1e1e); border-top: 1px solid var(--vscode-panel-border, #3c3c3c); font-size: 12px;">
+                <label for="provider-select-${id}" style="color: var(--vscode-descriptionForeground, #cccccc); font-weight: 500; white-space: nowrap;">Provider:</label>
+                <select id="provider-select-${id}" class="provider-select" style="flex: 1; min-width: 100px; padding: 4px 8px; background-color: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; font-size: 12px; cursor: pointer;">
+                    <option value="loading">Loading...</option>
+                </select>
+                <button class="refresh-providers" title="Refresh providers" style="padding: 4px 8px; background-color: transparent; color: var(--vscode-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; cursor: pointer; font-size: 14px; line-height: 1;">↻</button>
+            </div>
         `;
 
         // Set up event listeners for this conversation
@@ -186,6 +248,8 @@
         const sendButton = conversationView.querySelector('.send-button');
         const cancelButton = conversationView.querySelector('.cancel-button');
         const clearButton = conversationView.querySelector('.clear-chat');
+        const providerSelect = conversationView.querySelector('.provider-select');
+        const refreshProvidersBtn = conversationView.querySelector('.refresh-providers');
 
         sendButton.addEventListener('click', () => sendMessage(id, messageInput));
         
@@ -243,6 +307,31 @@
             vscode.postMessage({ type: 'clearChat', conversationId: id });
         });
 
+        // Handle provider selection change for this conversation
+        if (providerSelect) {
+            providerSelect.addEventListener('change', (e) => {
+                const selectedProvider = e.target.value;
+                vscode.postMessage({
+                    type: 'switchProvider',
+                    conversationId: id,
+                    provider: selectedProvider
+                });
+            });
+            
+            // Remove any focus event that might reload providers
+            // We only want explicit refresh button clicks to reload
+        }
+
+        // Handle refresh providers button
+        if (refreshProvidersBtn) {
+            refreshProvidersBtn.addEventListener('click', () => {
+                vscode.postMessage({
+                    type: 'refreshProviders',  // Different message type for refresh
+                    conversationId: id
+                });
+            });
+        }
+
         conversationsContainer.appendChild(conversationView);
 
         // Store in map
@@ -250,7 +339,14 @@
             title,
             messages: [],
             tabElement: tab,
-            viewElement: conversationView
+            viewElement: conversationView,
+            selectedProvider: null
+        });
+
+        // Request provider list for this conversation (initial load - no reload)
+        vscode.postMessage({ 
+            type: 'getProviders',
+            conversationId: id
         });
     }
 

@@ -8,8 +8,23 @@ pub enum SubprocessMessage {
         message: String,
     },
     Cancel,
+    ChangeProvider {
+        provider: String,
+    },
+    LoadSettings,
+    SaveSettings {
+        settings: serde_json::Value,
+    },
+    ReloadSettings,
 
     // Outgoing messages
+    SettingsLoaded {
+        settings: serde_json::Value,
+    },
+    SettingsSaved {
+        success: bool,
+        error: Option<String>,
+    },
     Response {
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,7 +51,9 @@ pub enum SubprocessMessage {
         event: String,
         data: serde_json::Value,
     },
-    Ready,
+    Ready {
+        settings: serde_json::Value,
+    },
     Error {
         error: String,
     },

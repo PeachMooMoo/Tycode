@@ -1,5 +1,3 @@
-// Formatter for colored terminal output
-
 #[derive(Clone)]
 pub struct Formatter {
     use_colors: bool,
@@ -15,14 +13,6 @@ impl Formatter {
             println!("\x1b[33m[System]\x1b[0m {}", msg);
         } else {
             println!("[System] {}", msg);
-        }
-    }
-
-    pub fn print_user(&self, msg: &str) {
-        if self.use_colors {
-            println!("\x1b[36m[You]\x1b[0m {}", msg);
-        } else {
-            println!("[You] {}", msg);
         }
     }
 
@@ -70,24 +60,6 @@ impl Formatter {
             "\x1b[35m>\x1b[0m ".to_string()
         } else {
             "> ".to_string()
-        }
-    }
-
-    pub fn print_splash_art(&self, art: &str, color_code: &str) {
-        for line in art.lines() {
-            if self.use_colors {
-                println!("{}{}\x1b[0m", color_code, line);
-            } else {
-                println!("{}", line);
-            }
-        }
-    }
-
-    pub fn print_welcome_header(&self, text: &str) {
-        if self.use_colors {
-            println!("\x1b[32m{}\x1b[0m", text);
-        } else {
-            println!("{}", text);
         }
     }
 
