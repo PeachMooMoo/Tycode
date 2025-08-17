@@ -37,6 +37,16 @@ pub enum ChatActorMessage {
         settings: serde_json::Value,
         response: tokio::sync::oneshot::Sender<Result<()>>,
     },
+    PushAgent {
+        agent_type: String,
+        task: String,
+        context: Option<String>,
+    },
+    PopAgent {
+        success: bool,
+        summary: String,
+        artifacts: Option<serde_json::Value>,
+    },
 }
 
 /// Handle to interact with the chat actor
@@ -65,13 +75,13 @@ impl ChatActor {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
 
+        let tx_clone = tx.clone();
+
         tokio::task::spawn_local(async move {
             let provider = match create_provider_from_settings(&settings).await {
                 Ok(p) => p,
                 Err(e) => {
                     error!("Failed to initialize provider: {}", e);
-                    // Don't just return - we need to keep the actor running
-                    // This error will be handled when trying to send messages
                     return;
                 }
             };
@@ -85,7 +95,7 @@ impl ChatActor {
                 workspace_roots,
             };
 
-            run_actor(actor_state, rx, cancel_rx).await;
+            run_actor_with_tx(actor_state, rx, cancel_rx, tx_clone).await;
         });
 
         ChatActor { tx, cancel_tx }
@@ -139,10 +149,11 @@ async fn create_provider_from_settings(settings: &SettingsManager) -> Result<Box
 }
 
 // Actor implementation as free functions
-async fn run_actor(
+async fn run_actor_with_tx(
     mut state: ActorState,
     mut rx: mpsc::UnboundedReceiver<ChatActorMessage>,
     mut cancel_rx: mpsc::UnboundedReceiver<()>,
+    actor_tx: mpsc::UnboundedSender<ChatActorMessage>,
 ) {
     info!("ChatActor started");
 
@@ -157,7 +168,7 @@ async fn run_actor(
                         handle_cancelled(&mut state);
                         // The process_message future is dropped here
                     }
-                    result = process_message(&mut state, message) => {
+                    result = process_message_with_tx(&mut state, message, &actor_tx) => {
                         if let Err(e) = result {
                             error!(?e, "Error processing message");
                             add_error_message(&state.state, format!("Error: {:?}", e));
@@ -181,14 +192,18 @@ async fn run_actor(
     }
 }
 
-async fn process_message(state: &mut ActorState, message: ChatActorMessage) -> Result<()> {
+async fn process_message_with_tx(
+    state: &mut ActorState,
+    message: ChatActorMessage,
+    actor_tx: &mpsc::UnboundedSender<ChatActorMessage>,
+) -> Result<()> {
     match message {
-        ChatActorMessage::UserInput(input) => handle_user_input(state, input).await,
+        ChatActorMessage::UserInput(input) => handle_user_input(state, input, actor_tx).await,
         ChatActorMessage::ProcessCommand(command) => {
             handle_command(state, &command).await;
             Ok(())
         }
-        ChatActorMessage::ContinueConversation => send_ai_request(state).await,
+        ChatActorMessage::ContinueConversation => send_ai_request(state, actor_tx).await,
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
         ChatActorMessage::ReloadSettings => handle_settings_reload(state).await,
         ChatActorMessage::GetSettings(response) => {
@@ -207,6 +222,16 @@ async fn process_message(state: &mut ActorState, message: ChatActorMessage) -> R
             let _ = response.send(result);
             Ok(())
         }
+        ChatActorMessage::PushAgent {
+            agent_type,
+            task,
+            context,
+        } => handle_push_agent(state, agent_type, task, context, actor_tx).await,
+        ChatActorMessage::PopAgent {
+            success,
+            summary,
+            artifacts,
+        } => handle_pop_agent(state, success, summary, artifacts, actor_tx).await,
     }
 }
 
@@ -233,7 +258,11 @@ fn handle_cancelled(state: &mut ActorState) {
     );
 }
 
-async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
+async fn handle_user_input(
+    state: &mut ActorState,
+    input: String,
+    actor_tx: &mpsc::UnboundedSender<ChatActorMessage>,
+) -> Result<()> {
     if input.trim().is_empty() {
         return Ok(());
     }
@@ -264,7 +293,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input),
     });
 
-    send_ai_request(state).await
+    send_ai_request(state, actor_tx).await
 }
 
 async fn handle_command(state: &mut ActorState, command: &str) {
@@ -305,7 +334,10 @@ async fn build_message_context(state: &ActorState) -> MessageContext {
     context
 }
 
-async fn send_ai_request(state: &mut ActorState) -> Result<()> {
+async fn send_ai_request(
+    state: &mut ActorState,
+    actor_tx: &mpsc::UnboundedSender<ChatActorMessage>,
+) -> Result<()> {
     state.state.set_typing(true);
 
     loop {
@@ -318,6 +350,7 @@ async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             state.workspace_roots.clone(),
             file_modification_api,
             Some(Arc::new(state.state.clone())),
+            actor_tx.clone(),
         );
 
         let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
@@ -486,14 +519,14 @@ async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
 async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
     info!("Reloading settings from disk");
-    
+
     // Reload settings from disk
     state.settings.reload()?;
-    
+
     // Check if the active provider has changed and update if needed
     let settings = state.settings.settings();
     let active_provider = &settings.active_provider;
-    
+
     // Only recreate provider if it's different from current
     // This is a bit tricky since we can't easily compare providers
     // For now, we'll recreate the provider to ensure it's up to date
@@ -519,12 +552,12 @@ async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
 
                 let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
                 state.provider = Box::new(BedrockProvider::new(client));
-                
+
                 info!("Reloaded provider configuration for: {}", active_provider);
             }
         }
     }
-    
+
     add_message(
         &state.state,
         ChatMessage {
@@ -538,7 +571,7 @@ async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
             token_usage: None,
         },
     );
-    
+
     Ok(())
 }
 
@@ -726,4 +759,128 @@ async fn handle_provider_change(state: &mut ActorState, provider_name: String) -
     }
 
     Ok(())
+}
+
+async fn handle_push_agent(
+    state: &mut ActorState,
+    agent_type: String,
+    task: String,
+    context: Option<String>,
+    actor_tx: &mpsc::UnboundedSender<ChatActorMessage>,
+) -> Result<()> {
+    use crate::agents::AgentCatalog;
+
+    info!("Pushing new agent: type={}, task={}", agent_type, task);
+
+    // Create the new agent
+    let Some(agent) = AgentCatalog::create_agent(&agent_type) else {
+        let error_msg = format!("Unknown agent type: {}", agent_type);
+        add_error_message(&state.state, error_msg);
+        return Ok(());
+    };
+
+    // Create initial message for the new agent
+    let mut initial_message = task.clone();
+    if let Some(ctx) = context {
+        initial_message.push_str(&format!("\n\nContext from parent agent:\n{}", ctx));
+    }
+
+    // Push the new agent onto the stack
+    let mut new_agent = ActiveAgent::new(agent);
+    new_agent.conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(initial_message.clone()),
+    });
+
+    state.agent_stack.push(new_agent);
+
+    // Notify user
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: format!("🔄 Spawning {} agent for task: {}", agent_type, task),
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
+
+    // Start the new agent's work
+    send_ai_request(state, actor_tx).await
+}
+
+async fn handle_pop_agent(
+    state: &mut ActorState,
+    success: bool,
+    summary: String,
+    artifacts: Option<serde_json::Value>,
+    actor_tx: &mpsc::UnboundedSender<ChatActorMessage>,
+) -> Result<()> {
+    info!("Popping agent: success={}, summary={}", success, summary);
+
+    // Don't pop if we're at the root agent
+    if state.agent_stack.len() <= 1 {
+        add_message(
+            &state.state,
+            ChatMessage {
+                content: "Cannot complete task - this is the root agent".to_string(),
+                sender: MessageSender::Error,
+                timestamp: Instant::now(),
+                reasoning: None,
+                tool_calls: Vec::new(),
+                model_info: None,
+                context_info: None,
+                token_usage: None,
+            },
+        );
+        return Ok(());
+    }
+
+    // Pop the current agent
+    state.agent_stack.pop();
+
+    // Add result to parent agent's conversation
+    let result_message = if success {
+        format!("✅ Sub-agent completed successfully:\n{}", summary)
+    } else {
+        format!("❌ Sub-agent failed:\n{}", summary)
+    };
+
+    if let Some(artifacts) = artifacts {
+        current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(format!(
+                "{}\n\nArtifacts returned:\n{}",
+                result_message,
+                serde_json::to_string(&artifacts)?
+            )),
+        });
+    } else {
+        current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(result_message.clone()),
+        });
+    }
+
+    // Notify user
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: result_message,
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
+
+    // Continue parent agent's work
+    send_ai_request(state, actor_tx).await
 }

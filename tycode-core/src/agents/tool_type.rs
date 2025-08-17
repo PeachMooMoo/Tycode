@@ -8,6 +8,8 @@ pub enum ToolType {
     ExecuteCommand,
     DeleteFile,
     SetTrackedFiles,
+    SpawnAgent,
+    CompleteTask,
 }
 
 impl ToolType {
@@ -21,6 +23,8 @@ impl ToolType {
             Self::ExecuteCommand => "execute_command",
             Self::DeleteFile => "delete_file",
             Self::SetTrackedFiles => "set_tracked_files",
+            Self::SpawnAgent => "spawn_agent",
+            Self::CompleteTask => "complete_task",
         }
     }
 
@@ -34,6 +38,8 @@ impl ToolType {
             "execute_command" => Some(Self::ExecuteCommand),
             "delete_file" => Some(Self::DeleteFile),
             "set_tracked_files" => Some(Self::SetTrackedFiles),
+            "spawn_agent" => Some(Self::SpawnAgent),
+            "complete_task" => Some(Self::CompleteTask),
             _ => None,
         }
     }

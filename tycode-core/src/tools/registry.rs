@@ -1,6 +1,8 @@
 use crate::agents::ToolType;
 use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
+use crate::chat::actor::ChatActorMessage;
 use crate::chat::state::{FileModificationApi, SharedChatState};
+use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::list_files::ListFilesTool;
@@ -10,9 +12,11 @@ use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::r#trait::ToolExecutor;
+use crate::tools::spawn_agent::SpawnAgent;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
 
 use super::execute_command::ExecuteCommandTool;
@@ -27,14 +31,16 @@ impl ToolRegistry {
         workspace_roots: Vec<PathBuf>,
         file_modification_api: FileModificationApi,
         chat_state: Option<Arc<SharedChatState>>,
+        actor_tx: UnboundedSender<ChatActorMessage>,
     ) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
             file_modification_api: file_modification_api.clone(),
         };
 
-        registry.register_file_tools(workspace_roots.clone(), file_modification_api, chat_state);
+        registry.register_file_tools(workspace_roots.clone(), file_modification_api, chat_state.clone());
         registry.register_command_tools(workspace_roots);
+        registry.register_agent_tools(actor_tx);
         registry
     }
 
@@ -74,6 +80,11 @@ impl ToolRegistry {
         self.register_tool(Arc::new(ExecuteCommandTool::new(workspace_roots)));
     }
 
+    fn register_agent_tools(&mut self, actor_tx: UnboundedSender<ChatActorMessage>) {
+        self.register_tool(Arc::new(SpawnAgent::new(actor_tx.clone())));
+        self.register_tool(Arc::new(CompleteTask::new(actor_tx)));
+    }
+
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
         let name = tool.name().to_string();
         debug!(tool_name = %name, "Registering tool");
@@ -94,6 +105,8 @@ impl ToolRegistry {
             ToolType::ExecuteCommand => Some("execute_command"),
             ToolType::DeleteFile => Some("delete_file"),
             ToolType::SetTrackedFiles => Some("set_tracked_files"),
+            ToolType::SpawnAgent => Some("spawn_agent"),
+            ToolType::CompleteTask => Some("complete_task"),
         }
     }
 
@@ -191,34 +204,40 @@ mod tests {
     #[tokio::test]
     async fn test_tool_registry_creation_patch_api() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
             None,
+            actor_tx,
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 7); // Including execute_command
+        assert_eq!(tools.len(), 9); // Including execute_command, spawn_agent, complete_task
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"apply_patch"));
         assert!(tools.contains(&"delete_file"));
+        assert!(tools.contains(&"spawn_agent"));
+        assert!(tools.contains(&"complete_task"));
         assert!(!tools.contains(&"replace_in_file"));
     }
 
     #[tokio::test]
     async fn test_tool_registry_creation_find_replace_api() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
             None,
+            actor_tx,
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 7); // Including execute_command
+        assert_eq!(tools.len(), 9); // Including execute_command, spawn_agent, complete_task
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
@@ -226,20 +245,24 @@ mod tests {
         assert!(tools.contains(&"replace_in_file"));
         assert!(tools.contains(&"delete_file"));
         assert!(tools.contains(&"execute_command"));
+        assert!(tools.contains(&"spawn_agent"));
+        assert!(tools.contains(&"complete_task"));
         assert!(!tools.contains(&"apply_patch"));
     }
 
     #[tokio::test]
     async fn test_tool_definitions() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
             None,
+            actor_tx,
         );
 
         let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 7); // Including execute_command
+        assert_eq!(definitions.len(), 9); // Including execute_command, spawn_agent, complete_task
 
         let read_file_def = definitions
             .iter()
@@ -251,10 +274,12 @@ mod tests {
     #[tokio::test]
     async fn test_tool_execution() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
             None,
+            actor_tx,
         );
 
         let test_file = temp_dir.path().join("test.txt");
@@ -279,10 +304,12 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_tool() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
             None,
+            actor_tx,
         );
 
         let tool_use = ToolUseData {
@@ -299,10 +326,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_tool_definitions_for_types() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
             None,
+            actor_tx,
         );
 
         let tool_types = vec![
@@ -323,10 +352,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_tool_definitions_for_types_find_replace() {
         let temp_dir = tempdir().unwrap();
+        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
             None,
+            actor_tx,
         );
 
         let tool_types = vec![
