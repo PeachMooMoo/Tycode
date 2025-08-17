@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { ConversationManager } from './conversationManager';
-import { Conversation, ConversationMessage } from './conversation';
+import { Conversation } from './conversation';
 import * as path from 'path';
+import { 
+    ConversationMessage, 
+    ToolResultEvent, 
+    MANAGER_EVENTS 
+} from './events';
 
 // Import build info - will be generated at build time
 let buildInfo = { buildTime: 'dev', timestamp: new Date().toISOString() };
@@ -31,7 +36,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
     }
 
     private setupConversationListeners(): void {
-        this.conversationManager.on('conversationCreated', (conversation: Conversation) => {
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CREATED, (conversation: Conversation) => {
             this.sendToWebview({
                 type: 'conversationCreated',
                 id: conversation.id,
@@ -40,41 +45,52 @@ export class MainProvider implements vscode.WebviewViewProvider {
             
             });
 
-        this.conversationManager.on('conversationUpdate', (id: string, updateType: string, message: ConversationMessage) => {
-            // Handle tool results separately
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_UPDATE, (id: string, updateType: string, data: any) => {
+            // IMPORTANT: Special handling for toolResult events!
+            // Tool results need special processing to extract diff data for file
+            // modifications. This is different from other message types which are
+            // passed through directly. The data parameter here is the raw 
+            // ToolResultEvent from the subprocess, NOT a ConversationMessage.
             if (updateType === 'toolResult') {
-                console.log('[MainProvider] Processing toolResult:', id, message);
+                console.log('[MainProvider] Processing toolResult:', id, data);
+                
+                // Cast to proper type - this is a ToolResultEvent, not a ConversationMessage
+                const toolResult = data as ToolResultEvent;
                 
                 // Check if this is a file modification with diff data
                 let diffId: string | undefined;
-                const toolMessage = message as any;
-                if (toolMessage.success && toolMessage.result) {
-                    const toolName = toolMessage.tool_name;
+                if (toolResult.success && toolResult.result) {
+                    const toolName = toolResult.tool_name;
                     if ((toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') &&
-                        toolMessage.result.original_content !== undefined &&
-                        toolMessage.result.new_content !== undefined) {
+                        toolResult.result.original_content !== undefined &&
+                        toolResult.result.new_content !== undefined) {
                         
+                        // Generate unique ID for this diff and store it
                         diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
                         console.log('[MainProvider] Storing diff with ID:', diffId);
                         this._diffDataStore.set(diffId, {
-                            filePath: toolMessage.result.path,
-                            originalContent: toolMessage.result.original_content,
-                            newContent: toolMessage.result.new_content
+                            filePath: toolResult.result.path,
+                            originalContent: toolResult.result.original_content,
+                            newContent: toolResult.result.new_content
                         });
                     }
                 }
                 
+                // Send tool result to webview with optional diffId
                 this.sendToWebview({
                     type: 'toolResult',
                     conversationId: id,
-                    toolName: toolMessage.tool_name,
-                    success: toolMessage.success,
-                    result: toolMessage.result,
-                    error: toolMessage.error,
+                    toolName: toolResult.tool_name,
+                    success: toolResult.success,
+                    result: toolResult.result,
+                    error: toolResult.error,
                     diffId: diffId
                 });
                 return;
             }
+            
+            // Standard message handling for non-toolResult events
+            const message = data as ConversationMessage;
             
             this.sendToWebview({
                 type: 'conversationMessage',
@@ -97,7 +113,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
             }
         });
 
-        this.conversationManager.on('conversationTitleChanged', (id: string, title: string) => {
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, (id: string, title: string) => {
             this.sendToWebview({
                 type: 'conversationTitleChanged',
                 id,
@@ -105,21 +121,21 @@ export class MainProvider implements vscode.WebviewViewProvider {
             });
         });
 
-        this.conversationManager.on('activeConversationChanged', (id: string) => {
+        this.conversationManager.on(MANAGER_EVENTS.ACTIVE_CONVERSATION_CHANGED, (id: string) => {
             this.sendToWebview({
                 type: 'activeConversationChanged',
                 id
             });
         });
 
-        this.conversationManager.on('conversationClosed', (id: string) => {
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CLOSED, (id: string) => {
             this.sendToWebview({
                 type: 'conversationClosed',
                 id
             });
         });
 
-        this.conversationManager.on('conversationDisconnected', (id: string) => {
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, (id: string) => {
             this.sendToWebview({
                 type: 'conversationDisconnected',
                 id

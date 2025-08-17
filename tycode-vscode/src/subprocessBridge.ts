@@ -2,24 +2,26 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-
-interface SubprocessMessage {
-    type: string;
-    [key: string]: any;
-}
+import { 
+    SubprocessMessage, 
+    ResponseEvent, 
+    ToolResultEvent, 
+    Settings,
+    BRIDGE_EVENTS 
+} from './events';
 
 export class SubprocessBridge extends EventEmitter {
     private child: ChildProcess | null = null;
     private buffer: string = '';
     private workspaceRoots?: string[];
-    private settings?: any;
+    private settings?: Settings;
 
     constructor(private context: vscode.ExtensionContext, workspaceRoots?: string[]) {
         super();
         this.workspaceRoots = workspaceRoots;
     }
 
-    getSettings(): any {
+    getSettings(): Settings | undefined {
         return this.settings;
     }
 
@@ -101,7 +103,7 @@ export class SubprocessBridge extends EventEmitter {
         this.child.on('exit', (code) => {
             console.log('Subprocess exited with code:', code);
             this.child = null;
-            this.emit('disconnected');
+            this.emit(BRIDGE_EVENTS.DISCONNECTED);
         });
 
         // Wait for ready signal
@@ -162,7 +164,7 @@ export class SubprocessBridge extends EventEmitter {
         this.child.stdin.write(JSON.stringify(msg) + '\n');
     }
 
-    async loadSettings(): Promise<any> {
+    async loadSettings(): Promise<Settings> {
         if (!this.child || !this.child.stdin) {
             throw new Error('Subprocess not initialized');
         }
@@ -176,6 +178,10 @@ export class SubprocessBridge extends EventEmitter {
                 if (message.type === 'SettingsLoaded') {
                     clearTimeout(timeout);
                     this.off('message', settingsHandler);
+                    if (!message.settings) {
+                        reject(new Error('No settings received from subprocess'));
+                        return;
+                    }
                     this.settings = message.settings; // Update cached settings
                     resolve(message.settings);
                 }
@@ -209,11 +215,11 @@ export class SubprocessBridge extends EventEmitter {
         const settings = await this.loadSettings();
         this.settings = settings;
         
-        // Emit an event so all ChatProviders can update their UI
-        this.emit('settingsReloaded', settings);
+        // Emit an event so all UI components can update
+        this.emit(BRIDGE_EVENTS.SETTINGS_RELOADED, settings);
     }
 
-    async saveSettings(settings: any): Promise<void> {
+    async saveSettings(settings: Settings): Promise<void> {
         if (!this.child || !this.child.stdin) {
             throw new Error('Subprocess not initialized');
         }
@@ -247,37 +253,45 @@ export class SubprocessBridge extends EventEmitter {
     }
 
     private handleMessage(message: SubprocessMessage) {
+        // Debug logging for event flow tracing
         console.log('[SubprocessBridge] Received message:', message.type, message);
-        this.emit('message', message);
+        this.emit(BRIDGE_EVENTS.MESSAGE, message);
 
         // Emit specific events based on message type
         switch (message.type) {
             case 'Response':
-                // New format includes more data
-                this.emit('response', {
-                    content: message.content,
+                // Emit typed ResponseEvent
+                const responseEvent: ResponseEvent = {
+                    content: message.content || '',
                     reasoning: message.reasoning,
                     tool_calls: message.tool_calls || [],
                     model: message.model,
                     is_complete: message.is_complete,
                     context_info: message.context_info,
                     token_usage: message.token_usage
-                });
+                };
+                console.log('[SubprocessBridge] Emitting response event:', responseEvent);
+                this.emit(BRIDGE_EVENTS.RESPONSE, responseEvent);
                 break;
+                
             case 'ToolResult':
-                console.log('[SubprocessBridge] Emitting toolResult event:', message);
-                this.emit('toolResult', {
-                    tool_name: message.tool_name,
-                    success: message.success,
+                // Emit typed ToolResultEvent
+                const toolResultEvent: ToolResultEvent = {
+                    tool_name: message.tool_name || '',
+                    success: message.success || false,
                     result: message.result,
                     error: message.error
-                });
+                };
+                console.log('[SubprocessBridge] Emitting toolResult event:', toolResultEvent);
+                this.emit(BRIDGE_EVENTS.TOOL_RESULT, toolResultEvent);
                 break;
+                
             case 'Event':
-                this.emit('event', message.event, message.data);
+                this.emit(BRIDGE_EVENTS.EVENT, message.event, message.data);
                 break;
+                
             case 'Error':
-                this.emit('error', message.error);
+                this.emit(BRIDGE_EVENTS.ERROR, message.error);
                 break;
         }
     }

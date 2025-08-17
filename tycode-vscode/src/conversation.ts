@@ -1,16 +1,13 @@
 import { EventEmitter } from 'events';
 import { SubprocessBridge } from './subprocessBridge';
 import * as vscode from 'vscode';
-
-export interface ConversationMessage {
-    role: string;
-    content: string;
-    reasoning?: string;
-    toolCalls?: any[];
-    model?: string;
-    isComplete?: boolean;
-    tokenUsage?: any;
-}
+import { 
+    ConversationMessage, 
+    ResponseEvent, 
+    ToolResultEvent,
+    BRIDGE_EVENTS,
+    CONVERSATION_EVENTS 
+} from './events';
 
 export class Conversation extends EventEmitter {
     public bridge: SubprocessBridge;
@@ -47,7 +44,7 @@ export class Conversation extends EventEmitter {
     set title(value: string) {
         this._title = value;
         this._isManuallyNamed = true;  // Mark as manually named when user sets title
-        this.emit('titleChanged', value);
+        this.emit(CONVERSATION_EVENTS.TITLE_CHANGED, value);
     }
 
     get messages(): ConversationMessage[] {
@@ -65,7 +62,7 @@ export class Conversation extends EventEmitter {
     set selectedProvider(provider: string | undefined) {
         if (this._selectedProvider !== provider) {
             this._selectedProvider = provider;
-            this.emit('providerChanged', provider);
+            this.emit(CONVERSATION_EVENTS.PROVIDER_CHANGED, provider);
         }
     }
 
@@ -75,8 +72,9 @@ export class Conversation extends EventEmitter {
 
         // Don't send provider change on init - let subprocess use its settings
         
-        // Set up event listeners
-        this.bridge.on('response', (response: any) => {
+        // Set up event listeners with proper typing
+        this.bridge.on(BRIDGE_EVENTS.RESPONSE, (response: ResponseEvent) => {
+            console.log('[Conversation] Received response event');
             const message: ConversationMessage = {
                 role: 'assistant',
                 content: response.content,
@@ -87,30 +85,32 @@ export class Conversation extends EventEmitter {
                 tokenUsage: response.token_usage
             };
             this._messages.push(message);
-            this.emit('response', message);
+            this.emit(CONVERSATION_EVENTS.RESPONSE, message);
         });
 
-        this.bridge.on('event', (event: string, data: any) => {
+        this.bridge.on(BRIDGE_EVENTS.EVENT, (event: string, data: any) => {
+            console.log('[Conversation] Received event:', event, data);
             if (event === 'system') {
                 const message: ConversationMessage = {
                     role: 'system',
                     content: data.content
                 };
                 this._messages.push(message);
-                this.emit('system', message);
+                this.emit(CONVERSATION_EVENTS.SYSTEM, message);
             }
         });
 
-        this.bridge.on('error', (error: string) => {
+        this.bridge.on(BRIDGE_EVENTS.ERROR, (error: string) => {
+            console.log('[Conversation] Received error:', error);
             const message: ConversationMessage = {
                 role: 'error',
                 content: error
             };
             this._messages.push(message);
-            this.emit('error', message);
+            this.emit(CONVERSATION_EVENTS.ERROR, message);
         });
 
-        this.bridge.on('toolResult', (result: any) => {
+        this.bridge.on(BRIDGE_EVENTS.TOOL_RESULT, (result: ToolResultEvent) => {
             console.log('[Conversation] Received toolResult:', result);
             const message: ConversationMessage = {
                 role: 'tool-result',
@@ -119,14 +119,16 @@ export class Conversation extends EventEmitter {
                 success: result.success,
                 result: result.result,
                 error: result.error
-            } as any;
+            };
             this._messages.push(message);
-            this.emit('toolResult', result);
+            // IMPORTANT: Pass the original result, not the message
+            this.emit(CONVERSATION_EVENTS.TOOL_RESULT, result);
         });
 
-        this.bridge.on('disconnected', () => {
+        this.bridge.on(BRIDGE_EVENTS.DISCONNECTED, () => {
+            console.log('[Conversation] Bridge disconnected');
             this._isActive = false;
-            this.emit('disconnected');
+            this.emit(CONVERSATION_EVENTS.DISCONNECTED);
         });
     }
 
@@ -141,7 +143,7 @@ export class Conversation extends EventEmitter {
             content
         };
         this._messages.push(userMessage);
-        this.emit('userMessage', userMessage);
+        this.emit(CONVERSATION_EVENTS.USER_MESSAGE, userMessage);
 
         // Auto-generate title from first message if not manually named
         if (!this._hasFirstMessage && !this._isManuallyNamed) {
@@ -150,7 +152,7 @@ export class Conversation extends EventEmitter {
             if (generatedTitle && generatedTitle !== this._title) {
                 this._title = generatedTitle;
                 // Don't mark as manually named since this is auto-generated
-                this.emit('titleChanged', generatedTitle);
+                this.emit(CONVERSATION_EVENTS.TITLE_CHANGED, generatedTitle);
             }
         }
 
@@ -206,7 +208,7 @@ export class Conversation extends EventEmitter {
 
     clearMessages(): void {
         this._messages = [];
-        this.emit('cleared');
+        this.emit(CONVERSATION_EVENTS.CLEARED);
     }
 
     async switchProvider(provider: string): Promise<void> {
@@ -225,7 +227,7 @@ export class Conversation extends EventEmitter {
         await this.bridge.changeProvider(provider);
 
         // Emit event
-        this.emit('providerSwitched', oldProvider, provider);
+        this.emit(CONVERSATION_EVENTS.PROVIDER_SWITCHED, oldProvider, provider);
 
         
     }

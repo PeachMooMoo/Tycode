@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { Conversation } from './conversation';
 import * as vscode from 'vscode';
+import { CONVERSATION_EVENTS, MANAGER_EVENTS } from './events';
 
 export class ConversationManager extends EventEmitter {
     private conversations: Map<string, Conversation> = new Map();
@@ -34,43 +35,43 @@ export class ConversationManager extends EventEmitter {
         this.activeConversationId = id;
 
         // Forward conversation events
-        conversation.on('response', (message) => {
-            this.emit('conversationUpdate', id, 'response', message);
+        conversation.on(CONVERSATION_EVENTS.RESPONSE, (message) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'response', message);
         });
 
-        conversation.on('userMessage', (message) => {
-            this.emit('conversationUpdate', id, 'userMessage', message);
+        conversation.on(CONVERSATION_EVENTS.USER_MESSAGE, (message) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'userMessage', message);
         });
 
-        conversation.on('system', (message) => {
-            this.emit('conversationUpdate', id, 'system', message);
+        conversation.on(CONVERSATION_EVENTS.SYSTEM, (message) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'system', message);
         });
 
-        conversation.on('error', (message) => {
-            this.emit('conversationUpdate', id, 'error', message);
+        conversation.on(CONVERSATION_EVENTS.ERROR, (message) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'error', message);
         });
 
-        conversation.on('toolResult', (result) => {
-            this.emit('conversationUpdate', id, 'toolResult', result);
+        conversation.on(CONVERSATION_EVENTS.TOOL_RESULT, (result) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolResult', result);
         });
 
-        conversation.on('titleChanged', (newTitle) => {
-            this.emit('conversationTitleChanged', id, newTitle);
+        conversation.on(CONVERSATION_EVENTS.TITLE_CHANGED, (newTitle) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, id, newTitle);
         });
 
-        conversation.on('providerChanged', (provider) => {
-            this.emit('conversationProviderChanged', id, provider);
+        conversation.on(CONVERSATION_EVENTS.PROVIDER_CHANGED, (provider) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_CHANGED, id, provider);
         });
 
-        conversation.on('providerSwitched', (oldProvider, newProvider) => {
-            this.emit('conversationProviderSwitched', id, oldProvider, newProvider);
+        conversation.on(CONVERSATION_EVENTS.PROVIDER_SWITCHED, (oldProvider, newProvider) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_SWITCHED, id, oldProvider, newProvider);
         });
 
-        conversation.on('disconnected', () => {
-            this.emit('conversationDisconnected', id);
+        conversation.on(CONVERSATION_EVENTS.DISCONNECTED, () => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, id);
         });
 
-        this.emit('conversationCreated', conversation);
+        this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
         
         return conversation;
     }
@@ -86,7 +87,7 @@ export class ConversationManager extends EventEmitter {
     setActiveConversation(id: string): boolean {
         if (this.conversations.has(id)) {
             this.activeConversationId = id;
-            this.emit('activeConversationChanged', id);
+            this.emit(MANAGER_EVENTS.ACTIVE_CONVERSATION_CHANGED, id);
             return true;
         }
         return false;
@@ -107,11 +108,11 @@ export class ConversationManager extends EventEmitter {
                 const remaining = Array.from(this.conversations.keys());
                 this.activeConversationId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
                 if (this.activeConversationId) {
-                    this.emit('activeConversationChanged', this.activeConversationId);
+                    this.emit(MANAGER_EVENTS.ACTIVE_CONVERSATION_CHANGED, this.activeConversationId);
                 }
             }
 
-            this.emit('conversationClosed', id);
+            this.emit(MANAGER_EVENTS.CONVERSATION_CLOSED, id);
             return true;
         }
         return false;
@@ -123,7 +124,7 @@ export class ConversationManager extends EventEmitter {
         }
         this.conversations.clear();
         this.activeConversationId = null;
-        this.emit('allConversationsClosed');
+        this.emit(MANAGER_EVENTS.ALL_CONVERSATIONS_CLOSED);
     }
 
     private generateId(): string {
