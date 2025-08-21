@@ -1,3 +1,4 @@
+use crate::security::types::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -10,6 +11,10 @@ pub struct Settings {
     /// Map of provider name to configuration
     #[serde(default)]
     pub providers: HashMap<String, ProviderConfig>,
+
+    /// Security configuration
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 fn default_active_provider() -> String {
@@ -25,9 +30,29 @@ pub enum ProviderConfig {
         #[serde(default = "default_region")]
         region: String,
     },
+    #[serde(rename = "mock")]
+    Mock {
+        #[serde(default)]
+        behavior: MockBehaviorConfig,
+    },
     // Future providers can be added here:
     // #[serde(rename = "openai")]
     // OpenAI { api_key: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MockBehaviorConfig {
+    Success,
+    RetryThenSuccess { errors_before_success: usize },
+    AlwaysRetryError,
+    AlwaysError,
+}
+
+impl Default for MockBehaviorConfig {
+    fn default() -> Self {
+        MockBehaviorConfig::Success
+    }
 }
 
 fn default_region() -> String {
@@ -48,6 +73,7 @@ impl Default for Settings {
         Self {
             active_provider: "default".to_string(),
             providers,
+            security: SecurityConfig::default(),
         }
     }
 }
@@ -97,6 +123,7 @@ impl ProviderConfig {
     pub fn bedrock_profile(&self) -> Option<&str> {
         match self {
             ProviderConfig::Bedrock { profile, .. } => Some(profile.as_str()),
+            ProviderConfig::Mock { .. } => None,
         }
     }
 }

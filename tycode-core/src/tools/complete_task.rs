@@ -1,9 +1,8 @@
-use crate::chat::actor::ChatActorMessage;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::security::types::RiskLevel;
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CompleteTaskParams {
@@ -17,15 +16,7 @@ struct CompleteTaskParams {
     artifacts: Option<Value>,
 }
 
-pub struct CompleteTask {
-    actor_tx: UnboundedSender<ChatActorMessage>,
-}
-
-impl CompleteTask {
-    pub fn new(actor_tx: UnboundedSender<ChatActorMessage>) -> Self {
-        Self { actor_tx }
-    }
-}
+pub struct CompleteTask;
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for CompleteTask {
@@ -43,7 +34,8 @@ impl ToolExecutor for CompleteTask {
          • You lack necessary permissions or access \
          SUCCEED when: \
          • All requested changes are implemented \
-         • The task objectives are met"
+         • The task objectives are met \
+         NOTE: Sub-agents must use this with failure instead of spawning more agents when stuck. Parent agents have more context to handle failures properly."
     }
 
     fn input_schema(&self) -> Value {
@@ -71,8 +63,12 @@ impl ToolExecutor for CompleteTask {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let params: CompleteTaskParams = serde_json::from_value(arguments.clone())?;
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
         // Validate failure reason is provided when failing
         if !params.success && params.failure_reason.is_none() {
@@ -88,32 +84,11 @@ impl ToolExecutor for CompleteTask {
             params.summary.clone()
         };
 
-        // Send message to chat actor to pop the current agent
-        self.actor_tx.send(ChatActorMessage::PopAgent {
+        // Return PopAgent variant - actor will handle the actual pop
+        Ok(ToolResult::PopAgent {
             success: params.success,
-            summary: summary.clone(),
-            artifacts: params.artifacts.clone(),
-        })?;
-
-        let result = json!({
-            "status": "completed",
-            "success": params.success,
-            "summary": summary,
-            "message": if params.success {
-                "Task completed successfully"
-            } else {
-                "Task failed"
-            }
-        });
-
-        // UI data for visualization
-        let ui_data = json!({
-            "type": "task_completed",
-            "success": params.success,
-            "summary": params.summary,
-            "failure_reason": params.failure_reason
-        });
-
-        Ok(ToolResult::with_ui(result, ui_data))
+            summary,
+            artifacts: params.artifacts,
+        })
     }
 }

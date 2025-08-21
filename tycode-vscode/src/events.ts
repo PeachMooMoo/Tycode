@@ -113,7 +113,8 @@ export const CONVERSATION_EVENTS = {
     PROVIDER_CHANGED: 'providerChanged',
     PROVIDER_SWITCHED: 'providerSwitched',
     DISCONNECTED: 'disconnected',
-    CLEARED: 'cleared'
+    CLEARED: 'cleared',
+    TYPING_STATUS: 'typing_status'
 } as const;
 
 // Conversation manager events

@@ -11,6 +11,7 @@ pub trait Agent: Send + Sync {
 pub struct ActiveAgent {
     pub agent: Box<dyn Agent>,
     pub conversation: Vec<Message>,
+    pub spawn_tool_use_id: Option<String>,
 }
 
 impl ActiveAgent {
@@ -18,6 +19,7 @@ impl ActiveAgent {
         Self {
             agent,
             conversation: Vec::new(),
+            spawn_tool_use_id: None,
         }
     }
 }

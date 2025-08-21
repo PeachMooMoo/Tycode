@@ -1,5 +1,6 @@
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -51,18 +52,22 @@ impl ToolExecutor for SearchFilesTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let directory_path = arguments
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let directory_path = request.arguments
             .get("directory_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: directory_path"))?;
 
-        let pattern = arguments
+        let pattern = request.arguments
             .get("pattern")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: pattern"))?;
 
-        let file_pattern = arguments.get("file_pattern").and_then(|v| v.as_str());
+        let file_pattern = request.arguments.get("file_pattern").and_then(|v| v.as_str());
 
         // Use FileAccessManager for secure file searching
         let results = self

@@ -3,6 +3,10 @@ use crate::subprocess::SubprocessMessage;
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use tracing::{error, info};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 pub struct SubprocessApp {
@@ -10,11 +14,23 @@ pub struct SubprocessApp {
 }
 
 impl SubprocessApp {
-    pub async fn new(workspace_roots: Option<Vec<PathBuf>>, settings_path: Option<PathBuf>) -> Result<Self> {
+    pub async fn new(
+        workspace_roots: Option<Vec<PathBuf>>,
+        settings_path: Option<PathBuf>,
+    ) -> Result<Self> {
+        // Setup tracing to file
+        Self::setup_tracing()?;
+
+        info!("Starting SubprocessApp");
+        info!("Workspace roots: {:?}", workspace_roots);
+        info!("Settings path: {:?}", settings_path);
+
         let base = BaseApp::new(workspace_roots, settings_path).await?;
 
         // Load initial settings through the actor
         let settings_json = base.get_settings().await?;
+        info!("Loaded settings, sending ready message");
+
         let ready_msg = serde_json::to_string(&SubprocessMessage::Ready {
             settings: settings_json,
         })?;
@@ -24,9 +40,45 @@ impl SubprocessApp {
         Ok(Self { base })
     }
 
+    fn setup_tracing() -> Result<()> {
+        use std::fs;
+        use tracing_subscriber::fmt;
+
+        // Create trace directory in user's home
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let trace_dir = PathBuf::from(home).join(".tycode").join("trace");
+        fs::create_dir_all(&trace_dir)?;
+
+        let log_file = trace_dir.join("tycode.log");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)?;
+
+        // Setup tracing subscriber with file output
+        tracing_subscriber::registry()
+            .with(
+                fmt::layer()
+                    .with_writer(file)
+                    .with_ansi(false)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .with_file(true)
+                    .with_line_number(true),
+            )
+            .with(EnvFilter::new("info"))
+            .init();
+
+        info!("Tracing initialized to {:?}", log_file);
+        Ok(())
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         use std::sync::mpsc;
         use std::thread;
+
+        info!("Starting subprocess run loop");
 
         let (stdin_tx, stdin_rx) = mpsc::channel::<String>();
 
@@ -49,7 +101,7 @@ impl SubprocessApp {
         tokio::task::spawn_local(async move {
             while let Ok(event) = event_rx.recv().await {
                 if let Err(e) = Self::format_to_json(event) {
-                    eprintln!("Error handling event: {:?}", e);
+                    error!("Error handling event: {:?}", e);
                 }
             }
         });
@@ -59,17 +111,22 @@ impl SubprocessApp {
                 Ok(line) => {
                     let trimmed = line.trim();
                     if !trimmed.is_empty() {
+                        info!("Received stdin message: {}", trimmed);
                         self.handle_stdin_message(trimmed).await?;
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    info!("Stdin disconnected, shutting down");
+                    break;
+                }
             }
 
             tokio::task::yield_now().await;
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
 
+        info!("Subprocess run loop completed");
         Ok(())
     }
 
@@ -128,7 +185,7 @@ impl SubprocessApp {
         // Send a reload message to the chat actor
         use tycode_core::chat::actor::ChatActorMessage;
         self.base.actor.tx.send(ChatActorMessage::ReloadSettings)?;
-        
+
         Ok(())
     }
 
@@ -216,7 +273,10 @@ impl SubprocessApp {
                     error,
                 })
             }
-            ChatEvent::TypingStatusChanged(_) => None,
+            ChatEvent::TypingStatusChanged(is_typing) => Some(SubprocessMessage::Event {
+                event: "typing_status".to_string(),
+                data: serde_json::json!({ "is_typing": is_typing }),
+            }),
             ChatEvent::OperationCancelled { message } => Some(SubprocessMessage::Event {
                 event: "cancelled".to_string(),
                 data: serde_json::json!({ "message": message }),

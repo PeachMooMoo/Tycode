@@ -1,5 +1,6 @@
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -43,13 +44,21 @@ impl ToolExecutor for WriteFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let file_path = arguments
+    fn evaluate_risk(&self, arguments: &Value) -> RiskLevel {
+        if let Some(file_path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+            self.file_manager.evaluate_path_risk(file_path)
+        } else {
+            RiskLevel::HighRisk
+        }
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let file_path = request.arguments
             .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let content = arguments
+        let content = request.arguments
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;

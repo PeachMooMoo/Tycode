@@ -9,7 +9,7 @@
     const typingIndicator = document.getElementById('typing-indicator');
     const providerSelect = document.getElementById('provider-select');
     const refreshProvidersBtn = document.getElementById('refresh-providers');
-    
+
     // Track if we're currently processing
     let isProcessing = false;
 
@@ -41,14 +41,14 @@
                 provider: selectedProvider
             });
         });
-        
+
         // Refresh provider list when dropdown is focused/clicked
         providerSelect.addEventListener('focus', () => {
             vscode.postMessage({
                 type: 'getProviders'
             });
         });
-        
+
         // Also refresh on click in case user clicks without focusing first
         providerSelect.addEventListener('click', () => {
             vscode.postMessage({
@@ -263,10 +263,10 @@
             currentRetryElement.className = 'message system retry-status';
             messagesContainer.appendChild(currentRetryElement);
         }
-        
+
         // Calculate next attempt time in seconds
         const nextAttemptIn = (backoffMs / 1000).toFixed(1);
-        
+
         // Extract meaningful error message
         let errorMsg = error;
         if (error.includes('rate limit') || error.includes('throttled')) {
@@ -281,7 +281,7 @@
                 errorMsg = errorMsg.substring(0, 100) + '...';
             }
         }
-        
+
         currentRetryElement.innerHTML = `
             <div class="retry-info">
                 <span class="retry-icon">🔄</span>
@@ -292,28 +292,28 @@
                 </span>
             </div>
         `;
-        
+
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function displayToolResult(toolName, success, result, error, diffId) {
         console.log('Tool result received:', { toolName, success, result, error, diffId });
-        
+
         // Find the most recent tool call item with this name
         const toolItems = document.querySelectorAll(`.tool-call-item[data-tool-name="${toolName}"]`);
         if (toolItems.length === 0) {
             console.warn('No tool item found for:', toolName);
             return;
         }
-        
+
         // Get the last one (most recent)
         const toolItem = toolItems[toolItems.length - 1];
-        
+
         // Update status icon and text
         const statusIcon = toolItem.querySelector('.tool-status-icon');
         const statusText = toolItem.querySelector('.tool-status-text');
         const resultDiv = toolItem.querySelector('.tool-result');
-        
+
         if (success) {
             statusIcon.textContent = '✅';
             statusText.textContent = 'Success';
@@ -323,11 +323,11 @@
             statusText.textContent = 'Failed';
             toolItem.classList.add('tool-error');
         }
-        
+
         // Display result if available
         if (result || error) {
             resultDiv.style.display = 'block';
-            
+
             // Format the result based on tool type
             let resultContent = '';
             if (error) {
@@ -361,7 +361,7 @@
                     if (result.files && Array.isArray(result.files)) {
                         resultContent = `<div class="tool-success-message">✓ Found ${result.files.length} files</div>`;
                     }
-                } else if (toolName === 'execute_command') {
+                } else if (toolName === 'run_build_test') {
                     if (result.exit_code !== undefined) {
                         const exitStatus = result.exit_code === 0 ? '✓' : '⚠';
                         resultContent = `<div class="tool-success-message">${exitStatus} Exit code: ${result.exit_code}</div>`;
@@ -377,19 +377,19 @@
                     resultContent = `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
                 }
             }
-            
+
             resultDiv.innerHTML = resultContent;
-            
+
             // Add event listener for View Diff button if it exists
             const viewDiffButton = resultDiv.querySelector('.view-diff-button');
             if (viewDiffButton) {
-                viewDiffButton.addEventListener('click', function() {
+                viewDiffButton.addEventListener('click', function () {
                     const diffId = this.getAttribute('data-diff-id');
                     viewDiff(diffId);
                 });
             }
         }
-        
+
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
@@ -496,21 +496,21 @@
     function handleCancel() {
         // Get any pending text in the input
         const pendingMessage = messageInput.value.trim();
-        
+
         // Send cancel command
         vscode.postMessage({ type: 'cancel' });
-        
+
         // If there's pending text, send it after a short delay
         if (pendingMessage) {
             // Clear the input first
             messageInput.value = '';
             messageInput.style.height = 'auto';
-            
+
             // Wait a brief moment for cancel to process, then send the new message
             setTimeout(() => {
                 // Display user message
                 displayMessage('user', pendingMessage);
-                
+
                 // Send to extension
                 vscode.postMessage({
                     type: 'sendMessage',
@@ -568,12 +568,23 @@
                 );
                 break;
             case 'showTyping':
-                console.log('[DEBUG] showTyping message received');
-                typingIndicator.style.display = 'flex';
-                showCancelButton();
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                console.log('[DEBUG] showTyping message received, show:', message.show);
+                if (message.show) {
+                    typingIndicator.style.display = 'flex';
+                    showCancelButton();
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                } else {
+                    typingIndicator.style.display = 'none';
+                    hideCancelButton();
+                    // Clear retry status when processing completes
+                    if (currentRetryElement) {
+                        currentRetryElement.style.display = 'none';
+                        currentRetryElement = null;
+                    }
+                }
                 break;
             case 'hideTyping':
+                // Legacy support - just hide everything
                 typingIndicator.style.display = 'none';
                 hideCancelButton();
                 // Clear retry status when processing completes

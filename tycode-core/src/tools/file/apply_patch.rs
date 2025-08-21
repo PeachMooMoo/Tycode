@@ -1,5 +1,6 @@
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -110,13 +111,21 @@ impl ToolExecutor for ApplyPatchTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let file_path = arguments
+    fn evaluate_risk(&self, arguments: &Value) -> RiskLevel {
+        if let Some(file_path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+            self.file_manager.evaluate_path_risk(file_path)
+        } else {
+            RiskLevel::HighRisk
+        }
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let file_path = request.arguments
             .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let patch = arguments
+        let patch = request.arguments
             .get("patch")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: patch"))?;
@@ -176,15 +185,21 @@ mod tests {
  line 3
  line 4"#;
 
+        let request = ToolRequest::new(json!({
+            "file_path": "test.txt",
+            "patch": patch
+        }), "test_id".to_string());
         let result = tool
-            .execute(&json!({
-                "file_path": "test.txt",
-                "patch": patch
-            }))
+            .execute(&request)
             .await
             .unwrap();
 
-        assert_eq!(result.context_data["success"], true);
+        match result {
+            ToolResult::Success { context_data, .. } => {
+                assert_eq!(context_data["success"], true);
+            }
+            _ => panic!("Expected Success variant"),
+        }
 
         // Verify the content was patched
         let new_content = file_manager.read_file("test.txt").await.unwrap();

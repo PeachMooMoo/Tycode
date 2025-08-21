@@ -24,7 +24,7 @@ struct Args {
     /// Workspace roots (for multi-root workspaces)
     #[arg(long, value_delimiter = ',')]
     workspace_roots: Option<Vec<String>>,
-    
+
     /// Path to the settings file (for testing or custom configurations)
     #[arg(long)]
     settings_path: Option<PathBuf>,
@@ -45,10 +45,6 @@ async fn async_main() -> Result<()> {
     let args = Args::parse();
 
     if !args.subprocess {
-        if let Err(e) = chat::setup_trace_logging() {
-            eprintln!("Warning: Failed to setup trace logging: {:?}", e);
-        }
-
         if std::env::var("RUST_LOG").is_ok() {
             tracing_subscriber::fmt()
                 .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

@@ -129,7 +129,7 @@
         if (message.conversations && message.conversations.length > 0) {
             for (const conv of message.conversations) {
                 createConversationUI(conv.id, conv.title);
-                
+
                 // Load existing messages
                 if (conv.messages) {
                     for (const msg of conv.messages) {
@@ -252,24 +252,24 @@
         const refreshProvidersBtn = conversationView.querySelector('.refresh-providers');
 
         sendButton.addEventListener('click', () => sendMessage(id, messageInput));
-        
+
         // Add cancel button handler with smart auto-send
         cancelButton.addEventListener('click', () => {
             // Get any pending text in the input
             const pendingMessage = messageInput.value.trim();
-            
+
             // Send cancel command with conversationId
-            vscode.postMessage({ 
+            vscode.postMessage({
                 type: 'cancel',
-                conversationId: id 
+                conversationId: id
             });
-            
+
             // If there's pending text, send it after a short delay
             if (pendingMessage) {
                 // Clear the input first
                 messageInput.value = '';
                 messageInput.style.height = 'auto';
-                
+
                 // Wait a brief moment for cancel to process, then send the new message
                 setTimeout(() => {
                     // Send to extension
@@ -317,7 +317,7 @@
                     provider: selectedProvider
                 });
             });
-            
+
             // Remove any focus event that might reload providers
             // We only want explicit refresh button clicks to reload
         }
@@ -344,7 +344,7 @@
         });
 
         // Request provider list for this conversation (initial load - no reload)
-        vscode.postMessage({ 
+        vscode.postMessage({
             type: 'getProviders',
             conversationId: id
         });
@@ -548,13 +548,13 @@
         const conversation = conversations.get(message.id);
         if (conversation) {
             conversation.title = message.title;
-            
+
             // Update tab elements
             const titleElement = conversation.tabElement.querySelector('.tab-title');
             const inputElement = conversation.tabElement.querySelector('.tab-title-input');
             if (titleElement) titleElement.textContent = message.title;
             if (inputElement) inputElement.value = message.title;
-            
+
             // Update header
             conversation.viewElement.querySelector('.chat-header h3').textContent = message.title;
         }
@@ -576,11 +576,11 @@
                 const messagesContainer = conversation.viewElement.querySelector('.messages');
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
-            
+
             // Swap send/cancel buttons
             const sendButton = conversation.viewElement.querySelector('.send-button');
             const cancelButton = conversation.viewElement.querySelector('.cancel-button');
-            
+
             if (sendButton && cancelButton) {
                 if (message.show) {
                     // Show cancel, hide send
@@ -609,30 +609,30 @@
 
     function handleToolResult(message) {
         console.log('Tool result received:', message);
-        
+
         const { conversationId, toolName, success, result, error, diffId } = message;
-        
+
         // Find the most recent tool call item with this name in the specified conversation
         const conversationView = document.querySelector(`.conversation-view[data-conversation-id="${conversationId}"]`);
         if (!conversationView) {
             console.warn('No conversation view found for:', conversationId);
             return;
         }
-        
+
         const toolItems = conversationView.querySelectorAll(`.tool-call-item[data-tool-name="${toolName}"]`);
         if (toolItems.length === 0) {
             console.warn('No tool item found for:', toolName, 'in conversation:', conversationId);
             return;
         }
-        
+
         // Get the last one (most recent)
         const toolItem = toolItems[toolItems.length - 1];
-        
+
         // Update status icon and text
         const statusIcon = toolItem.querySelector('.tool-status-icon');
         const statusText = toolItem.querySelector('.tool-status-text');
         const resultDiv = toolItem.querySelector('.tool-result');
-        
+
         if (success) {
             statusIcon.textContent = '✅';
             statusText.textContent = 'Success';
@@ -642,11 +642,11 @@
             statusText.textContent = 'Failed';
             toolItem.classList.add('tool-error');
         }
-        
+
         // Display result if available
         if (result || error) {
             resultDiv.style.display = 'block';
-            
+
             // Format the result based on tool type
             let resultContent = '';
             if (error) {
@@ -683,7 +683,7 @@
                     if (result.files && Array.isArray(result.files)) {
                         resultContent = `<div class="tool-success-message">✓ Found ${result.files.length} files</div>`;
                     }
-                } else if (toolName === 'execute_command') {
+                } else if (toolName === 'run_build_test') {
                     if (result.exit_code !== undefined) {
                         const exitStatus = result.exit_code === 0 ? '✓' : '⚠';
                         resultContent = `<div class="tool-success-message">${exitStatus} Exit code: ${result.exit_code}</div>`;
@@ -699,10 +699,10 @@
                     resultContent = `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
                 }
             }
-            
+
             resultDiv.innerHTML = resultContent;
         }
-        
+
         // Scroll to show the update
         const messagesContainer = conversationView.querySelector('.messages');
         if (messagesContainer) {
@@ -815,20 +815,20 @@
         inputElement.value = titleElement.textContent;
         inputElement.select();
         inputElement.focus();
-        
+
         // Mark tab as editing
         tab.classList.add('editing');
     }
 
     function saveTabTitle(conversationId, tab, titleElement, inputElement) {
         const newTitle = inputElement.value.trim();
-        
+
         // Don't save empty titles
         if (!newTitle) {
             cancelEditingTitle(conversationId, tab, titleElement, inputElement);
             return;
         }
-        
+
         // Only send message if title actually changed
         if (newTitle !== titleElement.textContent) {
             vscode.postMessage({
@@ -836,12 +836,12 @@
                 conversationId: conversationId,
                 title: newTitle
             });
-            
+
             // Update the displayed title immediately for responsiveness
             titleElement.textContent = newTitle;
             inputElement.value = newTitle;
         }
-        
+
         // Hide input, show title
         inputElement.style.display = 'none';
         titleElement.style.display = 'block';
@@ -851,7 +851,7 @@
     function cancelEditingTitle(conversationId, tab, titleElement, inputElement) {
         // Restore original value
         inputElement.value = titleElement.textContent;
-        
+
         // Hide input, show title
         inputElement.style.display = 'none';
         titleElement.style.display = 'block';

@@ -71,6 +71,10 @@ export class ConversationManager extends EventEmitter {
             this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, id);
         });
 
+        conversation.on(CONVERSATION_EVENTS.TYPING_STATUS, (data) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'typing_status', data);
+        });
+
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
         
         return conversation;

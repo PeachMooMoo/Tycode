@@ -1,7 +1,7 @@
 use crate::agents::ToolType;
-use crate::ai::{ToolDefinition, ToolResultData, ToolUseData};
-use crate::chat::actor::ChatActorMessage;
-use crate::chat::state::{FileModificationApi, SharedChatState};
+use crate::ai::{ToolDefinition, ToolUseData};
+use crate::chat::state::FileModificationApi;
+use crate::security::types::RiskLevel;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
@@ -11,15 +11,15 @@ use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::{ToolExecutor, ToolRequest};
 use crate::tools::spawn_agent::SpawnAgent;
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
 
-use super::execute_command::ExecuteCommandTool;
+use super::run_build_test::RunBuildTestTool;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn ToolExecutor>>,
@@ -27,20 +27,15 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    pub fn new(
-        workspace_roots: Vec<PathBuf>,
-        file_modification_api: FileModificationApi,
-        chat_state: Option<Arc<SharedChatState>>,
-        actor_tx: UnboundedSender<ChatActorMessage>,
-    ) -> Self {
+    pub fn new(workspace_roots: Vec<PathBuf>, file_modification_api: FileModificationApi) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
             file_modification_api: file_modification_api.clone(),
         };
 
-        registry.register_file_tools(workspace_roots.clone(), file_modification_api, chat_state.clone());
+        registry.register_file_tools(workspace_roots.clone(), file_modification_api);
         registry.register_command_tools(workspace_roots);
-        registry.register_agent_tools(actor_tx);
+        registry.register_agent_tools();
         registry
     }
 
@@ -48,21 +43,13 @@ impl ToolRegistry {
         &mut self,
         workspace_roots: Vec<PathBuf>,
         file_modification_api: FileModificationApi,
-        chat_state: Option<Arc<SharedChatState>>,
     ) {
         self.register_tool(Arc::new(ReadFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(WriteFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(ListFilesTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(SearchFilesTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(DeleteFileTool::new(workspace_roots.clone())));
-
-        // Register set_tracked_files tool if chat state is available
-        if let Some(chat_state) = chat_state {
-            self.register_tool(Arc::new(SetTrackedFilesTool::new(
-                workspace_roots.clone(),
-                chat_state,
-            )));
-        }
+        self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())));
 
         match file_modification_api {
             FileModificationApi::Patch => {
@@ -77,12 +64,12 @@ impl ToolRegistry {
     }
 
     fn register_command_tools(&mut self, workspace_roots: Vec<PathBuf>) {
-        self.register_tool(Arc::new(ExecuteCommandTool::new(workspace_roots)));
+        self.register_tool(Arc::new(RunBuildTestTool::new(workspace_roots)));
     }
 
-    fn register_agent_tools(&mut self, actor_tx: UnboundedSender<ChatActorMessage>) {
-        self.register_tool(Arc::new(SpawnAgent::new(actor_tx.clone())));
-        self.register_tool(Arc::new(CompleteTask::new(actor_tx)));
+    fn register_agent_tools(&mut self) {
+        self.register_tool(Arc::new(SpawnAgent));
+        self.register_tool(Arc::new(CompleteTask));
     }
 
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
@@ -102,7 +89,7 @@ impl ToolRegistry {
                 FileModificationApi::Patch => Some("apply_patch"),
                 FileModificationApi::FindReplace => Some("replace_in_file"),
             },
-            ToolType::ExecuteCommand => Some("execute_command"),
+            ToolType::RunBuildTestCommand => Some("run_build_test"),
             ToolType::DeleteFile => Some("delete_file"),
             ToolType::SetTrackedFiles => Some("set_tracked_files"),
             ToolType::SpawnAgent => Some("spawn_agent"),
@@ -135,62 +122,74 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub async fn execute_tool(&self, tool_use: &ToolUseData) -> (ToolResultData, Option<serde_json::Value>) {
+    pub async fn execute_tool(
+        &self,
+        tool_use: &ToolUseData,
+        allowed_tool_types: Option<&[ToolType]>,
+    ) -> crate::tools::r#trait::ToolResult {
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
             None => {
                 error!(tool_name = %tool_use.name, "Unknown tool");
-                return (
-                    ToolResultData {
-                        tool_use_id: tool_use.id.clone(),
-                        content: format!("Unknown tool: {}", tool_use.name),
-                        is_error: true,
-                    },
-                    None,
-                );
+                return crate::tools::r#trait::ToolResult::Error(format!(
+                    "Unknown tool: {}",
+                    tool_use.name
+                ));
             }
         };
 
-        match tool.execute(&tool_use.arguments).await {
-            Ok(result) => (
-                ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content: result.context_data.to_string(),
-                    is_error: false,
-                },
-                result.ui_data,
-            ),
-            Err(e) => {
-                error!(?e, tool_name = %tool_use.name, "Tool execution failed");
-                (
-                    ToolResultData {
-                        tool_use_id: tool_use.id.clone(),
-                        content: format!("Error: {:?}", e),
-                        is_error: true,
-                    },
-                    None,
-                )
+        // Then check if the tool is allowed by the agent (if restrictions are provided)
+        if let Some(allowed_types) = allowed_tool_types {
+            let allowed_names: Vec<&str> = allowed_types
+                .iter()
+                .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
+                .collect();
+
+            if !allowed_names.contains(&tool_use.name.as_str()) {
+                debug!(
+                    tool_name = %tool_use.name,
+                    allowed_tools = ?allowed_names,
+                    "Tool not in allowed list for current agent"
+                );
+                return crate::tools::r#trait::ToolResult::Error(format!(
+                    "Tool not available for current agent: {}",
+                    tool_use.name
+                ));
             }
         }
+
+        let request = ToolRequest::new(tool_use.arguments.clone(), tool_use.id.clone());
+        match tool.execute(&request).await {
+            Ok(result) => result,
+            Err(e) => {
+                error!(?e, tool_name = %tool_use.name, "Tool execution failed");
+                crate::tools::r#trait::ToolResult::Error(format!("Error: {:?}", e))
+            }
+        }
+    }
+
+    pub fn evaluate_tool_risk(
+        &self,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<RiskLevel> {
+        let tool = self
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| anyhow!("Unknown tool: {}", tool_name))?;
+
+        let risk_level = tool.evaluate_risk(arguments);
+        debug!(
+            tool_name = %tool_name,
+            ?risk_level,
+            "Evaluated tool risk"
+        );
+
+        Ok(risk_level)
     }
 
     pub fn list_tools(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
-    }
-}
-
-impl Clone for ToolRegistry {
-    fn clone(&self) -> Self {
-        let mut new_registry = Self {
-            tools: HashMap::new(),
-            file_modification_api: self.file_modification_api.clone(),
-        };
-
-        for (name, tool) in &self.tools {
-            new_registry.tools.insert(name.clone(), tool.clone());
-        }
-
-        new_registry
     }
 }
 
@@ -204,12 +203,9 @@ mod tests {
     #[tokio::test]
     async fn test_tool_registry_creation_patch_api() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
-            None,
-            actor_tx,
         );
 
         let tools = registry.list_tools();
@@ -228,12 +224,9 @@ mod tests {
     #[tokio::test]
     async fn test_tool_registry_creation_find_replace_api() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
-            None,
-            actor_tx,
         );
 
         let tools = registry.list_tools();
@@ -253,12 +246,9 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
-            None,
-            actor_tx,
         );
 
         let definitions = registry.get_tool_definitions();
@@ -268,18 +258,17 @@ mod tests {
             .iter()
             .find(|def| def.name == "read_file")
             .unwrap();
-        assert_eq!(read_file_def.description, "Read the contents of a file");
+        assert!(read_file_def
+            .description
+            .contains("Read the contents of a file"));
     }
 
     #[tokio::test]
     async fn test_tool_execution() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
-            None,
-            actor_tx,
         );
 
         let test_file = temp_dir.path().join("test.txt");
@@ -294,22 +283,23 @@ mod tests {
             }),
         };
 
-        let (result, _ui_data) = registry.execute_tool(&tool_use).await;
-        assert!(!result.is_error);
-
-        let content: serde_json::Value = serde_json::from_str(&result.content).unwrap();
-        assert_eq!(content["content"], "Hello, registry!");
+        let result = registry.execute_tool(&tool_use, None).await;
+        match result {
+            crate::tools::r#trait::ToolResult::Success { context_data, .. } => {
+                let content: serde_json::Value =
+                    serde_json::from_str(&context_data.to_string()).unwrap();
+                assert_eq!(content["content"], "Hello, registry!");
+            }
+            _ => panic!("Expected success result"),
+        }
     }
 
     #[tokio::test]
     async fn test_unknown_tool() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
-            None,
-            actor_tx,
         );
 
         let tool_use = ToolUseData {
@@ -318,20 +308,21 @@ mod tests {
             arguments: json!({}),
         };
 
-        let (result, _ui_data) = registry.execute_tool(&tool_use).await;
-        assert!(result.is_error);
-        assert!(result.content.contains("Unknown tool"));
+        let result = registry.execute_tool(&tool_use, None).await;
+        match result {
+            crate::tools::r#trait::ToolResult::Error(msg) => {
+                assert!(msg.contains("Unknown tool"));
+            }
+            _ => panic!("Expected error result"),
+        }
     }
 
     #[tokio::test]
     async fn test_get_tool_definitions_for_types() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::Patch,
-            None,
-            actor_tx,
         );
 
         let tool_types = vec![
@@ -352,12 +343,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_tool_definitions_for_types_find_replace() {
         let temp_dir = tempdir().unwrap();
-        let (actor_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = ToolRegistry::new(
             vec![temp_dir.path().to_path_buf()],
             FileModificationApi::FindReplace,
-            None,
-            actor_tx,
         );
 
         let tool_types = vec![
@@ -371,5 +359,53 @@ mod tests {
         let tool_names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(tool_names.contains(&"read_file"));
         assert!(tool_names.contains(&"replace_in_file"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_with_allowed_types() {
+        let temp_dir = tempdir().unwrap();
+        let registry = ToolRegistry::new(
+            vec![temp_dir.path().to_path_buf()],
+            FileModificationApi::Patch,
+        );
+
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, "Test content").unwrap();
+
+        // Test 1: Tool allowed - should succeed
+        let allowed_types = vec![ToolType::ReadFile, ToolType::WriteFile];
+        let tool_use = ToolUseData {
+            id: "test_id".to_string(),
+            name: "read_file".to_string(),
+            arguments: json!({
+                "file_path": "test.txt",
+                "summary": false
+            }),
+        };
+
+        let result = registry.execute_tool(&tool_use, Some(&allowed_types)).await;
+        match result {
+            crate::tools::r#trait::ToolResult::Success { .. } => {}
+            _ => panic!("Expected success result"),
+        }
+
+        // Test 2: Tool not in allowed list - should fail
+        let restricted_types = vec![ToolType::WriteFile]; // No ReadFile
+        let result = registry
+            .execute_tool(&tool_use, Some(&restricted_types))
+            .await;
+        match result {
+            crate::tools::r#trait::ToolResult::Error(msg) => {
+                assert!(msg.contains("Tool not available for current agent"));
+            }
+            _ => panic!("Expected error result"),
+        }
+
+        // Test 3: No restrictions (None) - should succeed
+        let result = registry.execute_tool(&tool_use, None).await;
+        match result {
+            crate::tools::r#trait::ToolResult::Success { .. } => {}
+            _ => panic!("Expected success result"),
+        }
     }
 }

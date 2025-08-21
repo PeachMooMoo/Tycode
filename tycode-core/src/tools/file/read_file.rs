@@ -1,5 +1,6 @@
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -73,13 +74,17 @@ impl ToolExecutor for ReadFileTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let file_path = arguments
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let file_path = request.arguments
             .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let summary = arguments
+        let summary = request.arguments
             .get("summary")
             .and_then(|v| v.as_bool())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: summary"))?;

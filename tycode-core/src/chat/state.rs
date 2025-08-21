@@ -1,18 +1,45 @@
 use crate::chat::events::{ChatEvent, ChatMessage};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
-use std::path::PathBuf;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+/// ChatState holds UI-specific state for rendering the chat interface.
+/// 
+/// This state is owned by SharedChatState and is used to:
+/// - Display chat message history to the user
+/// - Show typing/thinking indicators
+/// - Track command input history for UI features like arrow-key navigation
+/// 
+/// This state should NOT contain:
+/// - Application configuration (belongs in ActorState)
+/// - File tracking state (belongs in ActorState)
+/// - Security settings (belongs in ActorState)
+/// - AI provider configuration (belongs in ActorState)
+/// - Any business logic state (belongs in ActorState)
+/// 
+/// The separation ensures that the UI layer only contains display-specific
+/// state while all application logic remains in the actor.
 pub struct ChatState {
+    /// Messages to display in the chat UI
     pub messages: VecDeque<ChatMessage>,
+    /// Command history for UI navigation (up/down arrows)
     pub input_history: Vec<String>,
+    /// Whether the assistant is currently processing (shows loading indicator)
     pub is_typing: bool,
-    pub config: ChatConfig,
-    pub tracked_files: HashSet<PathBuf>,
 }
 
+impl ChatState {
+    pub fn new() -> Self {
+        Self {
+            messages: VecDeque::new(),
+            input_history: Vec::new(),
+            is_typing: false,
+        }
+    }
+}
+
+/// Configuration for chat behavior - moved to ActorState
 #[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub file_modification_api: FileModificationApi,
@@ -40,43 +67,15 @@ impl Default for FileModificationApi {
     }
 }
 
-impl ChatState {
-    pub fn new() -> Self {
-        Self {
-            messages: VecDeque::new(),
-            input_history: Vec::new(),
-            is_typing: false,
-            config: ChatConfig::default(),
-            tracked_files: HashSet::new(),
-        }
-    }
-
-    pub fn track_file(&mut self, path: PathBuf) -> bool {
-        self.tracked_files.insert(path)
-    }
-
-    pub fn untrack_file(&mut self, path: &PathBuf) -> bool {
-        self.tracked_files.remove(path)
-    }
-
-    pub fn get_tracked_files(&self) -> Vec<PathBuf> {
-        self.tracked_files.iter().cloned().collect()
-    }
-
-    pub fn is_file_tracked(&self, path: &PathBuf) -> bool {
-        self.tracked_files.contains(path)
-    }
-
-    pub fn clear_tracked_files(&mut self) {
-        self.tracked_files.clear()
-    }
-
-    pub fn set_tracked_files(&mut self, files: Vec<PathBuf>) {
-        self.tracked_files.clear();
-        self.tracked_files.extend(files);
-    }
-}
-
+/// SharedChatState wraps UI-specific state and provides event broadcasting.
+/// 
+/// This is a lightweight wrapper that:
+/// - Maintains chat UI state (messages, typing status, input history)
+/// - Broadcasts events to UI subscribers for reactive updates
+/// - Provides thread-safe access to UI state
+/// 
+/// All application logic, configuration, and business state is managed
+/// by the ChatActor and its ActorState.
 #[derive(Clone)]
 pub struct SharedChatState {
     inner: Arc<Mutex<ChatState>>,
@@ -137,63 +136,8 @@ impl SharedChatState {
         state.is_typing
     }
 
-    pub fn get_config(&self) -> ChatConfig {
+    pub fn get_input_history(&self) -> Vec<String> {
         let state = self.inner.lock().unwrap();
-        state.config.clone()
-    }
-
-    pub fn set_config(&self, config: ChatConfig) {
-        let mut state = self.inner.lock().unwrap();
-        state.config = config;
-    }
-
-    pub fn set_file_modification_api(&self, api: FileModificationApi) {
-        let mut state = self.inner.lock().unwrap();
-        state.config.file_modification_api = api;
-    }
-
-    pub fn get_file_modification_api(&self) -> FileModificationApi {
-        let state = self.inner.lock().unwrap();
-        state.config.file_modification_api.clone()
-    }
-
-    pub fn set_trace(&self, trace: bool) {
-        let mut state = self.inner.lock().unwrap();
-        state.config.trace = trace;
-    }
-
-    pub fn get_trace(&self) -> bool {
-        let state = self.inner.lock().unwrap();
-        state.config.trace
-    }
-
-    pub fn track_file(&self, path: PathBuf) -> bool {
-        let mut state = self.inner.lock().unwrap();
-        state.track_file(path)
-    }
-
-    pub fn untrack_file(&self, path: &PathBuf) -> bool {
-        let mut state = self.inner.lock().unwrap();
-        state.untrack_file(path)
-    }
-
-    pub fn get_tracked_files(&self) -> Vec<PathBuf> {
-        let state = self.inner.lock().unwrap();
-        state.get_tracked_files()
-    }
-
-    pub fn is_file_tracked(&self, path: &PathBuf) -> bool {
-        let state = self.inner.lock().unwrap();
-        state.is_file_tracked(path)
-    }
-
-    pub fn clear_tracked_files(&self) {
-        let mut state = self.inner.lock().unwrap();
-        state.clear_tracked_files()
-    }
-
-    pub fn set_tracked_files(&self, files: Vec<PathBuf>) {
-        let mut state = self.inner.lock().unwrap();
-        state.set_tracked_files(files)
+        state.input_history.clone()
     }
 }

@@ -97,6 +97,9 @@ export class Conversation extends EventEmitter {
                 };
                 this._messages.push(message);
                 this.emit(CONVERSATION_EVENTS.SYSTEM, message);
+            } else if (event === 'typing_status') {
+                // Forward typing status without adding to messages
+                this.emit(CONVERSATION_EVENTS.TYPING_STATUS, data);
             }
         });
 

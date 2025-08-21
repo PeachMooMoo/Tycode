@@ -89,6 +89,17 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 return;
             }
             
+            // Handle typing status events
+            if (updateType === 'typing_status') {
+                console.log('[MainProvider] Received typing_status:', id, data);
+                this.sendToWebview({
+                    type: 'showTyping',
+                    conversationId: id,
+                    show: data.is_typing
+                });
+                return;
+            }
+            
             // Standard message handling for non-toolResult events
             const message = data as ConversationMessage;
             
@@ -98,19 +109,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 messageType: updateType,
                 message
             });
-
-            // Hide typing indicator only when we get a complete response from assistant
-            if (updateType === 'response' && message.role === 'assistant') {
-                // isComplete is undefined for messages without tool calls (which means complete)
-                // or explicitly true when tools were used and completed
-                if (message.isComplete !== false) {
-                    this.sendToWebview({
-                        type: 'showTyping',
-                        conversationId: id,
-                        show: false
-                    });
-                }
-            }
         });
 
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, (id: string, title: string) => {
@@ -271,23 +269,10 @@ export class MainProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // Show typing indicator
-        this.sendToWebview({
-            type: 'showTyping',
-            conversationId,
-            show: true
-        });
-
         try {
             await conversation.sendMessage(message);
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to send message: ${error}`);
-            // Hide typing indicator on error
-            this.sendToWebview({
-                type: 'showTyping',
-                conversationId,
-                show: false
-            });
         }
     }
 

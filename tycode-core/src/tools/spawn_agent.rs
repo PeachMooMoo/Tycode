@@ -1,10 +1,9 @@
 use crate::agents::AgentCatalog;
-use crate::chat::actor::ChatActorMessage;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::security::types::RiskLevel;
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SpawnAgentParams {
@@ -16,15 +15,7 @@ struct SpawnAgentParams {
     agent_type: Option<String>,
 }
 
-pub struct SpawnAgent {
-    actor_tx: UnboundedSender<ChatActorMessage>,
-}
-
-impl SpawnAgent {
-    pub fn new(actor_tx: UnboundedSender<ChatActorMessage>) -> Self {
-        Self { actor_tx }
-    }
-}
+pub struct SpawnAgent;
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for SpawnAgent {
@@ -33,13 +24,13 @@ impl ToolExecutor for SpawnAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Spawn a sub-agent to handle a specific task. The sub-agent starts with fresh context and runs to completion. Use this to break complex tasks into focused subtasks."
+        "Spawn a sub-agent to handle a specific task. The sub-agent starts with fresh context and runs to completion. Use this to break complex tasks into focused subtasks. WARNING: Never use this to work around failures - if you're a sub-agent and get stuck, use complete_task with failure instead to let the parent handle it."
     }
 
     fn input_schema(&self) -> Value {
         let agent_names = AgentCatalog::get_agent_names();
         let agent_descriptions = AgentCatalog::get_agent_descriptions();
-        
+
         json!({
             "type": "object",
             "required": ["task"],
@@ -61,33 +52,24 @@ impl ToolExecutor for SpawnAgent {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let params: SpawnAgentParams = serde_json::from_value(arguments.clone())?;
-        
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let params: SpawnAgentParams = serde_json::from_value(request.arguments.clone())?;
+
         // Determine agent type, default to software_engineer
-        let agent_type = params.agent_type.unwrap_or_else(|| "software_engineer".to_string());
-        
-        // Send message to chat actor to push the new agent
-        self.actor_tx.send(ChatActorMessage::PushAgent {
-            agent_type: agent_type.clone(),
-            task: params.task.clone(),
-            context: params.context.clone(),
-        })?;
-        
-        let result = json!({
-            "status": "spawned",
-            "task": params.task,
-            "agent_type": agent_type,
-            "message": "Sub-agent spawned and is now handling the task"
-        });
-        
-        // UI data for visualization
-        let ui_data = json!({
-            "type": "agent_spawned",
-            "task": params.task,
-            "agent_type": agent_type
-        });
-        
-        Ok(ToolResult::with_ui(result, ui_data))
+        let agent_type = params
+            .agent_type
+            .unwrap_or_else(|| "software_engineer".to_string());
+
+        // Return PushAgent variant - actor will handle the actual push
+        Ok(ToolResult::PushAgent {
+            agent_type,
+            task: params.task,
+            context: params.context,
+            tool_use_id: request.tool_use_id.clone(),
+        })
     }
 }

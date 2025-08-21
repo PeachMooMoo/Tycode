@@ -13,11 +13,15 @@ pub struct InteractiveApp {
 }
 
 impl InteractiveApp {
-    pub async fn new(workspace_roots: Option<Vec<PathBuf>>, settings_path: Option<PathBuf>) -> Result<Self> {
+    pub async fn new(
+        workspace_roots: Option<Vec<PathBuf>>,
+        settings_path: Option<PathBuf>,
+    ) -> Result<Self> {
         let base = BaseApp::new(workspace_roots, settings_path).await?;
         let formatter = Formatter::new();
 
-        let welcome_message = "💡 Type /help for commands, /settings to view configuration, /quit to exit";
+        let welcome_message =
+            "💡 Type /help for commands, /settings to view configuration, /quit to exit";
 
         formatter.print_system(welcome_message);
 
@@ -99,7 +103,7 @@ impl InteractiveApp {
         self.formatter.print_system("📚 Available Commands:");
         self.formatter.print_system("");
 
-        let commands = self.base.command_handler.get_available_commands();
+        let commands = tycode_core::chat::commands::get_available_commands();
         let max_name_len = commands.iter().map(|cmd| cmd.name.len()).max().unwrap_or(0);
 
         for command in commands {
@@ -132,23 +136,24 @@ impl InteractiveApp {
         let settings_json = match self.base.get_settings().await {
             Ok(s) => s,
             Err(e) => {
-                self.formatter.print_error(&format!("Failed to load settings: {}", e));
+                self.formatter
+                    .print_error(&format!("Failed to load settings: {}", e));
                 return;
             }
         };
 
-        let settings: tycode_core::settings::Settings = match serde_json::from_value(settings_json) {
+        let settings: tycode_core::settings::Settings = match serde_json::from_value(settings_json)
+        {
             Ok(s) => s,
             Err(e) => {
-                self.formatter.print_error(&format!("Failed to parse settings: {}", e));
+                self.formatter
+                    .print_error(&format!("Failed to parse settings: {}", e));
                 return;
             }
         };
 
-        self.formatter.print_system(&format!(
-            "  Active Provider: {}",
-            settings.active_provider
-        ));
+        self.formatter
+            .print_system(&format!("  Active Provider: {}", settings.active_provider));
         self.formatter.print_system("");
 
         if !settings.providers.is_empty() {
@@ -156,9 +161,10 @@ impl InteractiveApp {
             for (name, config) in &settings.providers {
                 let is_active = name == &settings.active_provider;
                 let marker = if is_active { " (active)" } else { "" };
-                
-                self.formatter.print_system(&format!("    {}{}:", name, marker));
-                
+
+                self.formatter
+                    .print_system(&format!("    {}{}:", name, marker));
+
                 match config {
                     tycode_core::settings::ProviderConfig::Bedrock { profile, region } => {
                         self.formatter.print_system("      Type: AWS Bedrock");
@@ -166,6 +172,11 @@ impl InteractiveApp {
                             .print_system(&format!("      Profile: {}", profile));
                         self.formatter
                             .print_system(&format!("      Region: {}", region));
+                    }
+                    tycode_core::settings::ProviderConfig::Mock { behavior } => {
+                        self.formatter.print_system("      Type: Mock (Testing)");
+                        self.formatter
+                            .print_system(&format!("      Behavior: {:?}", behavior));
                     }
                 }
             }

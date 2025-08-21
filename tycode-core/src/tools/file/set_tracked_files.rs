@@ -1,24 +1,19 @@
-use crate::chat::state::SharedChatState;
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct SetTrackedFilesTool {
     file_manager: FileAccessManager,
-    chat_state: Arc<SharedChatState>,
 }
 
 impl SetTrackedFilesTool {
-    pub fn new(workspace_roots: Vec<PathBuf>, chat_state: Arc<SharedChatState>) -> Self {
+    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
         let file_manager = FileAccessManager::new(workspace_roots);
-        Self {
-            file_manager,
-            chat_state,
-        }
+        Self { file_manager }
     }
 }
 
@@ -48,8 +43,12 @@ impl ToolExecutor for SetTrackedFilesTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let file_paths = arguments
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let file_paths = request.arguments
             .get("file_paths")
             .and_then(|v| v.as_array())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_paths"))?;
@@ -75,9 +74,6 @@ impl ToolExecutor for SetTrackedFilesTool {
             ));
         }
 
-        // Clear existing and set new tracked files
-        self.chat_state.set_tracked_files(new_paths.clone());
-
         // Calculate total context size
         let mut total_size = 0usize;
         for path in &new_paths {
@@ -87,16 +83,31 @@ impl ToolExecutor for SetTrackedFilesTool {
             }
         }
 
-        Ok(ToolResult::context_only(json!({
-            "success": true,
-            "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
-            "tracked_files_count": new_paths.len(),
-            "total_context_size_bytes": total_size,
-            "message": if new_paths.is_empty() {
-                "Cleared all tracked files".to_string()
-            } else {
-                format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
-            }
-        })))
+        // Return the files to track in the result
+        // The actor will handle actually updating the tracked files state
+        Ok(ToolResult::with_ui(
+            json!({
+                "action": "set_tracked_files",
+                "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                "tracked_files_count": new_paths.len(),
+                "total_context_size_bytes": total_size,
+                "message": if new_paths.is_empty() {
+                    "Cleared all tracked files".to_string()
+                } else {
+                    format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
+                }
+            }),
+            json!({
+                "success": true,
+                "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                "tracked_files_count": new_paths.len(),
+                "total_context_size_bytes": total_size,
+                "message": if new_paths.is_empty() {
+                    "Cleared all tracked files".to_string()
+                } else {
+                    format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
+                }
+            })
+        ))
     }
 }

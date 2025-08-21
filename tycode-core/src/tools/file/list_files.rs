@@ -1,5 +1,6 @@
+use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -43,8 +44,12 @@ impl ToolExecutor for ListFilesTool {
         })
     }
 
-    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let directory_path = arguments.get("directory_path").and_then(|v| v.as_str());
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+
+    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
+        let directory_path = request.arguments.get("directory_path").and_then(|v| v.as_str());
 
         let mut all_entries = Vec::new();
         let display_path;
