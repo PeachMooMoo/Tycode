@@ -11,9 +11,10 @@ use crate::chat::{
 use crate::security::SecurityManager;
 use crate::settings::{ProviderConfig, SettingsManager};
 use anyhow::{bail, Result};
+use aws_config::timeout::TimeoutConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -312,6 +313,14 @@ async fn create_provider(
                 .profile_name(profile)
                 .region(Region::new(region.to_string()))
                 .retry_config(RetryConfig::disabled())
+                .timeout_config(
+                    // Tuned for Alaska airline's Wifi
+                    TimeoutConfig::builder()
+                        .connect_timeout(Duration::from_secs(60))
+                        .operation_attempt_timeout(Duration::from_secs(300))
+                        .read_timeout(Duration::from_secs(300))
+                        .build(),
+                )
                 .load()
                 .await;
 
