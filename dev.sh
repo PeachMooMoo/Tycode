@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Development helper script for TyCode VSCode extension
+# Development helper script for TyCode
 
 set -e
 
@@ -10,8 +10,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}TyCode VSCode Extension Development Helper${NC}"
-echo "==========================================="
+echo -e "${GREEN}TyCode Development Helper${NC}"
+echo "========================="
 echo ""
 
 case "$1" in
@@ -32,7 +32,9 @@ case "$1" in
         
         # Install Node dependencies
         echo -e "${YELLOW}Installing Node dependencies...${NC}"
+        cd tycode-vscode
         npm install
+        cd ..
         
         echo -e "${GREEN}Setup complete!${NC}"
         ;;
@@ -42,12 +44,11 @@ case "$1" in
         
         # Build native Rust CLI
         echo -e "${YELLOW}Building native Rust CLI...${NC}"
-        cd ..
         cargo build --release
-        cd tycode-vscode
         
         # Build TypeScript
         echo -e "${YELLOW}Compiling TypeScript...${NC}"
+        cd tycode-vscode
         npm run compile
         
         # Copy webview assets
@@ -63,8 +64,10 @@ case "$1" in
             echo -e "${RED}Warning: Some webview files may not have been copied${NC}"
         fi
         
+        cd ..
+        
         echo -e "${GREEN}Build complete!${NC}"
-        echo -e "${YELLOW}Note: The extension uses the native CLI at ../target/release/tycode${NC}"
+        echo -e "${YELLOW}Note: The extension uses the native CLI at ./target/release/tycode${NC}"
         ;;
         
     quick-build)
@@ -72,12 +75,11 @@ case "$1" in
         
         # Build native Rust CLI in debug mode
         echo -e "${YELLOW}Building native Rust CLI (debug mode)...${NC}"
-        cd ..
         cargo build
-        cd tycode-vscode
         
         # Build TypeScript
         echo -e "${YELLOW}Compiling TypeScript...${NC}"
+        cd tycode-vscode
         npm run compile
         
         # Copy webview assets
@@ -86,8 +88,10 @@ case "$1" in
         cp src/webview/*.css out/webview/ 2>/dev/null || true
         cp src/webview/*.js out/webview/ 2>/dev/null || true
         
+        cd ..
+        
         echo -e "${GREEN}Quick build complete!${NC}"
-        echo -e "${YELLOW}Note: The extension uses the native CLI at ../target/debug/tycode${NC}"
+        echo -e "${YELLOW}Note: The extension uses the native CLI at ./target/debug/tycode${NC}"
         ;;
         
     watch)
@@ -95,6 +99,7 @@ case "$1" in
         
         # First do a full build to ensure everything is copied
         echo -e "${YELLOW}Doing initial build...${NC}"
+        cd tycode-vscode
         npm run compile
         mkdir -p out/webview
         cp src/webview/*.css out/webview/ 2>/dev/null || true
@@ -111,12 +116,13 @@ case "$1" in
         
         # Create binaries directory structure
         echo -e "${YELLOW}Creating binaries directory structure...${NC}"
+        cd tycode-vscode
         rm -rf binaries
         mkdir -p binaries/{darwin-x64,darwin-arm64,linux-x64,win32-x64}
+        cd ..
         
         # Build native Rust CLI for current platform first
         echo -e "${YELLOW}Building native Rust CLI (release mode)...${NC}"
-        cd ..
         cargo build --release
         
         # Detect current platform and copy binary
@@ -201,27 +207,45 @@ case "$1" in
         else
             echo -e "${RED}Failed to create package${NC}"
         fi
+        
+        cd ..
         ;;
         
     test)
-        echo -e "${YELLOW}Running tests...${NC}"
+        echo -e "${YELLOW}Running all tests...${NC}"
+        
+        # Run Rust tests
+        echo -e "${YELLOW}Running Rust tests...${NC}"
+        cargo test
+        
+        # Run npm tests
+        echo -e "${YELLOW}Running VSCode extension tests...${NC}"
+        cd tycode-vscode
         npm test
+        cd ..
+        
+        echo -e "${GREEN}All tests complete!${NC}"
         ;;
         
     clean)
         echo -e "${YELLOW}Cleaning build artifacts...${NC}"
+        
+        # Clean TypeScript/Node artifacts
+        cd tycode-vscode
         rm -rf out/
         rm -rf node_modules/
         rm -f *.vsix
-        # Clean Rust build
         cd ..
+        
+        # Clean Rust build
         cargo clean
-        cd tycode-vscode
+        
         echo -e "${GREEN}Clean complete!${NC}"
         ;;
         
     copy-webview)
         echo -e "${YELLOW}Copying webview files...${NC}"
+        cd tycode-vscode
         mkdir -p out/webview
         cp src/webview/*.css out/webview/ 2>/dev/null || true
         cp src/webview/*.js out/webview/ 2>/dev/null || true
@@ -232,6 +256,7 @@ case "$1" in
         else
             echo -e "${RED}Failed to copy webview files${NC}"
         fi
+        cd ..
         ;;
         
     build-universal)
@@ -241,8 +266,6 @@ case "$1" in
             echo -e "${RED}Universal binary can only be built on macOS${NC}"
             exit 1
         fi
-        
-        cd ..
         
         # Build for both architectures
         echo -e "${YELLOW}Building for x86_64...${NC}"
@@ -263,8 +286,6 @@ case "$1" in
         
         echo -e "${GREEN}Universal binary created!${NC}"
         file tycode-vscode/binaries/darwin-universal/tycode
-        
-        cd tycode-vscode
         ;;
         
     *)
@@ -276,14 +297,14 @@ case "$1" in
         echo "  quick-build     - Fast development build (debug mode)"
         echo "  watch           - Start TypeScript watch mode for development"
         echo "  package         - Create VSIX package for distribution"
-        echo "  test            - Run tests"
+        echo "  test            - Run all tests (Rust and VSCode extension)"
         echo "  clean           - Remove build artifacts"
         echo "  copy-webview    - Copy webview HTML/CSS/JS files to output"
         echo "  build-universal - Build universal macOS binary (macOS only)"
         echo ""
         echo "Notes:"
         echo "  - The extension uses the native Rust CLI via subprocess bridge"
-        echo "  - CLI binary location: ../target/debug/tycode (debug) or ../target/release/tycode (release)"
+        echo "  - CLI binary location: ./target/debug/tycode (debug) or ./target/release/tycode (release)"
         echo "  - Use 'quick-build' for faster development iteration"
         echo "  - Use 'build' for production releases"
         echo "  - For cross-platform packaging, install: cargo install cross"

@@ -4,6 +4,7 @@
     // State management
     let conversations = new Map(); // id -> { title, messages, element }
     let activeConversationId = null;
+    let currentRetryElements = new Map(); // conversationId -> retry element
 
     // DOM elements
     const welcomeScreen = document.getElementById('welcome-screen');
@@ -67,6 +68,9 @@
                 break;
             case 'providerSwitched':
                 handleProviderSwitched(message);
+                break;
+            case 'retryAttempt':
+                handleRetryAttempt(message);
                 break;
         }
     });
@@ -592,9 +596,55 @@
                     sendButton.style.display = 'block';
                     cancelButton.style.display = 'none';
                     conversation.isProcessing = false;
+                    
+                    // Clear retry status when processing completes
+                    const retryElement = currentRetryElements.get(message.conversationId);
+                    if (retryElement) {
+                        retryElement.remove();
+                        currentRetryElements.delete(message.conversationId);
+                    }
                 }
             }
         }
+    }
+
+    function handleRetryAttempt(message) {
+        const { conversationId, attempt, maxRetries, error, backoffMs } = message;
+        const conversation = conversations.get(conversationId);
+        if (!conversation) return;
+
+        const messagesContainer = conversation.viewElement.querySelector('.messages');
+        if (!messagesContainer) return;
+
+        // Get or create retry status element
+        let retryElement = currentRetryElements.get(conversationId);
+        if (!retryElement) {
+            retryElement = document.createElement('div');
+            retryElement.className = 'message system retry-status';
+            messagesContainer.appendChild(retryElement);
+            currentRetryElements.set(conversationId, retryElement);
+        }
+
+        // Format error message
+        const errorMsg = error ? error.substring(0, 100) : 'Request failed';
+        const nextAttemptIn = Math.ceil(backoffMs / 1000);
+
+        // Update retry status display
+        retryElement.innerHTML = `
+            <div class="retry-info">
+                <span class="retry-icon">🔄</span>
+                <span class="retry-text">
+                    [Request failed - retrying (attempt ${attempt}/${maxRetries})]
+                    <br>
+                    <span class="retry-error">${escapeHtml(errorMsg)}</span>
+                    <br>
+                    <span class="retry-countdown">Next attempt in ${nextAttemptIn}s...</span>
+                </span>
+            </div>
+        `;
+
+        // Scroll to show the retry status
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function handleConversationDisconnected(message) {

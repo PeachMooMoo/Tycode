@@ -100,6 +100,9 @@ export class Conversation extends EventEmitter {
             } else if (event === 'typing_status') {
                 // Forward typing status without adding to messages
                 this.emit(CONVERSATION_EVENTS.TYPING_STATUS, data);
+            } else if (event === 'retry_attempt') {
+                // Forward retry attempt event properly
+                this.emit(CONVERSATION_EVENTS.RETRY_ATTEMPT, data);
             }
         });
 

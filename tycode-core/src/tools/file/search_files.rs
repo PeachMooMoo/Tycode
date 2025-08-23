@@ -46,6 +46,18 @@ impl ToolExecutor for SearchFilesTool {
                 "file_pattern": {
                     "type": "string",
                     "description": "Optional file name pattern (e.g. '*.rs')"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default: 100)"
+                },
+                "include_context": {
+                    "type": "boolean",
+                    "description": "Include context lines before/after matches (default: false)"
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Number of context lines to include when include_context is true (default: 2)"
                 }
             },
             "required": ["directory_path", "pattern"]
@@ -68,11 +80,26 @@ impl ToolExecutor for SearchFilesTool {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: pattern"))?;
 
         let file_pattern = request.arguments.get("file_pattern").and_then(|v| v.as_str());
+        
+        let max_results = request.arguments
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
+        
+        let include_context = request.arguments
+            .get("include_context")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        
+        let context_lines = request.arguments
+            .get("context_lines")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
 
         // Use FileAccessManager for secure file searching
-        let results = self
+        let (results, truncated) = self
             .file_manager
-            .search_files(directory_path, pattern, file_pattern)
+            .search_files(directory_path, pattern, file_pattern, max_results, include_context, context_lines)
             .await?;
 
         let mut json_results = Vec::new();
@@ -87,18 +114,33 @@ impl ToolExecutor for SearchFilesTool {
                 })
                 .unwrap_or_else(|| result.path.to_string_lossy().to_string());
 
-            json_results.push(json!({
+            let mut result_obj = json!({
                 "path": relative_path,
                 "line_number": result.line_number,
                 "line": result.line_content,
-                "context_before": result.context_before,
-                "context_after": result.context_after,
-            }));
+            });
+            
+            // Only include context if present
+            if let Some(context_before) = result.context_before {
+                result_obj["context_before"] = json!(context_before);
+            }
+            if let Some(context_after) = result.context_after {
+                result_obj["context_after"] = json!(context_after);
+            }
+
+            json_results.push(result_obj);
         }
 
-        Ok(ToolResult::context_only(json!({
+        let mut response = json!({
             "results": json_results,
             "count": json_results.len(),
-        })))
+        });
+        
+        if truncated {
+            response["truncated"] = json!(true);
+            response["message"] = json!("Results truncated to limit");
+        }
+
+        Ok(ToolResult::context_only(response))
     }
 }

@@ -19,6 +19,40 @@ export interface ConversationMessage {
     error?: string;
 }
 
+// Strongly typed events from core
+export interface CoreSystemEvent {
+    type: 'system';
+    content: string;
+}
+
+export interface CoreTypingStatusEvent {
+    type: 'typing_status';
+    is_typing: boolean;
+}
+
+export interface CoreRetryAttemptEvent {
+    type: 'retry_attempt';
+    attempt: number;
+    max_retries: number;
+    error: string;
+    backoff_ms: number;
+}
+
+export type CoreEvent = CoreSystemEvent | CoreTypingStatusEvent | CoreRetryAttemptEvent;
+
+// Type guards for core events
+export function isCoreRetryAttemptEvent(data: any): data is CoreRetryAttemptEvent {
+    return data && typeof data.attempt === 'number' && typeof data.max_retries === 'number';
+}
+
+export function isCoreTypingStatusEvent(data: any): data is CoreTypingStatusEvent {
+    return data && typeof data.is_typing === 'boolean' && !('attempt' in data);
+}
+
+export function isCoreSystemEvent(data: any): data is CoreSystemEvent {
+    return data && typeof data.content === 'string' && !('is_typing' in data);
+}
+
 // Response event from AI provider
 export interface ResponseEvent {
     content: string;
@@ -114,7 +148,8 @@ export const CONVERSATION_EVENTS = {
     PROVIDER_SWITCHED: 'providerSwitched',
     DISCONNECTED: 'disconnected',
     CLEARED: 'cleared',
-    TYPING_STATUS: 'typing_status'
+    TYPING_STATUS: 'typing_status',
+    RETRY_ATTEMPT: 'retry_attempt'
 } as const;
 
 // Conversation manager events

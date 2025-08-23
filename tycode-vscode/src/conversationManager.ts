@@ -75,6 +75,10 @@ export class ConversationManager extends EventEmitter {
             this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'typing_status', data);
         });
 
+        conversation.on(CONVERSATION_EVENTS.RETRY_ATTEMPT, (data) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'retry_attempt', data);
+        });
+
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
         
         return conversation;

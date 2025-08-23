@@ -92,6 +92,22 @@ export class MainProvider implements vscode.WebviewViewProvider {
             // Handle typing status events
             if (updateType === 'typing_status') {
                 console.log('[MainProvider] Received typing_status:', id, data);
+                
+                // Check if this is actually a retry attempt event
+                if (data.event_type === 'retry_attempt') {
+                    console.log('[MainProvider] Processing retry_attempt:', data);
+                    this.sendToWebview({
+                        type: 'retryAttempt',
+                        conversationId: id,
+                        attempt: data.attempt,
+                        maxRetries: data.max_retries,
+                        error: data.error,
+                        backoffMs: data.backoff_ms
+                    });
+                    return;
+                }
+                
+                // Standard typing status
                 this.sendToWebview({
                     type: 'showTyping',
                     conversationId: id,

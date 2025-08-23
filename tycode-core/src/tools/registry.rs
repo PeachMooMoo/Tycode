@@ -209,13 +209,15 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 9); // Including execute_command, spawn_agent, complete_task
+        assert_eq!(tools.len(), 10);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"apply_patch"));
         assert!(tools.contains(&"delete_file"));
+        assert!(tools.contains(&"set_tracked_files"));
+        assert!(tools.contains(&"run_build_test"));
         assert!(tools.contains(&"spawn_agent"));
         assert!(tools.contains(&"complete_task"));
         assert!(!tools.contains(&"replace_in_file"));
@@ -230,14 +232,15 @@ mod tests {
         );
 
         let tools = registry.list_tools();
-        assert_eq!(tools.len(), 9); // Including execute_command, spawn_agent, complete_task
+        assert_eq!(tools.len(), 10);
         assert!(tools.contains(&"read_file"));
         assert!(tools.contains(&"write_file"));
         assert!(tools.contains(&"list_files"));
         assert!(tools.contains(&"search_files"));
         assert!(tools.contains(&"replace_in_file"));
         assert!(tools.contains(&"delete_file"));
-        assert!(tools.contains(&"execute_command"));
+        assert!(tools.contains(&"set_tracked_files"));
+        assert!(tools.contains(&"run_build_test"));
         assert!(tools.contains(&"spawn_agent"));
         assert!(tools.contains(&"complete_task"));
         assert!(!tools.contains(&"apply_patch"));
@@ -252,7 +255,7 @@ mod tests {
         );
 
         let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 9); // Including execute_command, spawn_agent, complete_task
+        assert_eq!(definitions.len(), 10);
 
         let read_file_def = definitions
             .iter()

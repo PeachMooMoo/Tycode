@@ -169,7 +169,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let tool = ApplyPatchTool::new(vec![temp_dir.path().to_path_buf()]);
 
-        // Create a test file using FileAccessManager
         let file_manager = FileAccessManager::new(vec![temp_dir.path().to_path_buf()]);
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
@@ -177,13 +176,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Create a patch
-        let patch = r#"@@ -2,3 +2,3 @@
- line 1
+        let patch = r#"@@ -2,1 +2,1 @@
 -line 2
-+line 2 modified
- line 3
- line 4"#;
++line 2 modified"#;
 
         let request = ToolRequest::new(json!({
             "file_path": "test.txt",
@@ -201,9 +196,9 @@ mod tests {
             _ => panic!("Expected Success variant"),
         }
 
-        // Verify the content was patched
         let new_content = file_manager.read_file("test.txt").await.unwrap();
         assert!(new_content.contains("line 2 modified"));
-        assert!(!new_content.contains("line 2\n"));
+        assert!(!new_content.contains("\nline 2\n"));
+        assert_eq!(new_content, "line 1\nline 2 modified\nline 3\nline 4\nline 5");
     }
 }

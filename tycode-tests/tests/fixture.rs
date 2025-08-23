@@ -1,9 +1,196 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum OutgoingMessage {
+    Chat { message: String },
+    SetSettings { path: String },
+    Exit,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum IncomingMessage {
+    Ready {
+        #[serde(default)]
+        version: Option<String>,
+    },
+    Response {
+        content: String,
+    },
+    Event {
+        event: EventType,
+        #[serde(default)]
+        data: Option<EventData>,
+    },
+    ToolResult {
+        tool_name: String,
+        success: bool,
+        #[serde(default)]
+        error: Option<String>,
+        #[serde(default)]
+        result: Option<serde_json::Value>,
+    },
+    Error {
+        error: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    RetryAttempt,
+    System,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EventData {
+    RetryAttempt(RetryAttemptData),
+    System(SystemEventData),
+    Other(HashMap<String, serde_json::Value>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryAttemptData {
+    pub attempt: u64,
+    pub max_retries: u64,
+    pub error: String,
+    pub backoff_ms: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemEventData {
+    pub content: String,
+}
+
+impl IncomingMessage {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, IncomingMessage::Ready { .. })
+    }
+
+    pub fn is_response(&self) -> bool {
+        matches!(self, IncomingMessage::Response { .. })
+    }
+
+    pub fn is_event(&self) -> bool {
+        matches!(self, IncomingMessage::Event { .. })
+    }
+
+    pub fn is_retry_event(&self) -> bool {
+        matches!(
+            self,
+            IncomingMessage::Event {
+                event: EventType::RetryAttempt,
+                ..
+            }
+        )
+    }
+
+    pub fn is_error(&self) -> bool {
+        matches!(self, IncomingMessage::Error { .. })
+    }
+
+    pub fn is_tool_result(&self) -> bool {
+        matches!(self, IncomingMessage::ToolResult { .. })
+    }
+
+    pub fn as_response(&self) -> Option<&str> {
+        match self {
+            IncomingMessage::Response { content } => Some(content.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn as_retry_event(&self) -> Option<&RetryAttemptData> {
+        match self {
+            IncomingMessage::Event {
+                event: EventType::RetryAttempt,
+                data: Some(EventData::RetryAttempt(retry_data)),
+            } => Some(retry_data),
+            _ => None,
+        }
+    }
+
+    pub fn as_error(&self) -> Option<&str> {
+        match self {
+            IncomingMessage::Error { error } => Some(error.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn as_tool_result(&self) -> Option<(&str, bool, Option<&str>)> {
+        match self {
+            IncomingMessage::ToolResult {
+                tool_name,
+                success,
+                error,
+                ..
+            } => Some((tool_name.as_str(), *success, error.as_deref())),
+            _ => None,
+        }
+    }
+
+    pub fn is_security_blocked(&self) -> bool {
+        match self {
+            IncomingMessage::ToolResult {
+                success: false,
+                error: Some(error),
+                ..
+            } => {
+                error.contains("Security:")
+                    || error.contains("denied by security")
+                    || error.contains("Risk level:")
+            }
+            _ => false,
+        }
+    }
+
+    pub fn extract_security_info(&self) -> Option<SecurityInfo> {
+        if !self.is_security_blocked() {
+            return None;
+        }
+
+        match self {
+            IncomingMessage::ToolResult {
+                tool_name,
+                error: Some(error),
+                ..
+            } => {
+                let mut risk_level = "unknown".to_string();
+                let mut description = error.to_string();
+                let mut risk_explanation = None;
+
+                for line in error.lines() {
+                    if let Some(level) = line.strip_prefix("Risk level: ") {
+                        risk_level = level.to_string();
+                    } else if let Some(desc) = line.strip_prefix("Security: ") {
+                        description = desc.to_string();
+                    } else if let Some(risk) = line.strip_prefix("Risk: ") {
+                        risk_explanation = Some(risk.to_string());
+                    }
+                }
+
+                Some(SecurityInfo {
+                    tool_name: tool_name.clone(),
+                    risk_level,
+                    description,
+                    risk_explanation,
+                })
+            }
+            _ => None,
+        }
+    }
+}
 
 /// Common test fixture for subprocess integration tests
 #[derive(Debug)]
@@ -16,14 +203,11 @@ pub struct SubprocessFixture {
 }
 
 impl SubprocessFixture {
-    /// Create a new subprocess test fixture with default settings
     pub fn new() -> anyhow::Result<Self> {
         Self::with_settings(None)
     }
 
-    /// Get the path to the tycode binary, building it if necessary
     fn get_tycode_binary() -> anyhow::Result<PathBuf> {
-        // Strategy 1: Check CARGO_TARGET_DIR environment variable (set by cargo test)
         if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
             let binary = Path::new(&target_dir).join("debug").join("tycode");
             if binary.exists() {
@@ -31,17 +215,13 @@ impl SubprocessFixture {
             }
         }
 
-        // Strategy 2: Use the test binary location to find the target directory
         if let Ok(current_exe) = std::env::current_exe() {
-            // The test binary is typically at target/debug/deps/test_name-hash
-            // We need to go up to find the target directory
-            if let Some(target_dir) = current_exe
-                .parent() // deps
-                .and_then(|p| p.parent()) // debug or release
+            let target_dir = current_exe
+                .parent()
                 .and_then(|p| p.parent())
-            // target
-            {
-                // Check both debug and release
+                .and_then(|p| p.parent());
+            
+            if let Some(target_dir) = target_dir {
                 for profile in &["debug", "release"] {
                     let binary = target_dir.join(profile).join("tycode");
                     if binary.exists() {
@@ -51,11 +231,9 @@ impl SubprocessFixture {
             }
         }
 
-        // Strategy 3: Search relative to current directory and parent directories
         let current_dir = std::env::current_dir()?;
         let mut search_dir = current_dir.as_path();
 
-        // Search up to 3 levels up for target directory
         for _ in 0..3 {
             let target_dir = search_dir.join("target");
             if target_dir.exists() {
@@ -67,21 +245,16 @@ impl SubprocessFixture {
                 }
             }
 
-            // Move up one directory
-            if let Some(parent) = search_dir.parent() {
-                search_dir = parent;
-            } else {
-                break;
-            }
+            search_dir = match search_dir.parent() {
+                Some(parent) => parent,
+                None => break,
+            };
         }
 
-        // Binary not found, try to build it
         eprintln!("tycode binary not found, attempting to build...");
 
-        // Find the workspace root (directory containing root Cargo.toml with [workspace])
         let workspace_root = Self::find_workspace_root()?;
 
-        // Build the binary
         let output = Command::new("cargo")
             .args(&["build", "--bin", "tycode", "-p", "tycode-cli"])
             .current_dir(&workspace_root)
@@ -94,7 +267,6 @@ impl SubprocessFixture {
             );
         }
 
-        // After building, try to find it again using the same strategies
         let target_dir = workspace_root.join("target");
         let binary = target_dir.join("debug").join("tycode");
 
@@ -108,59 +280,48 @@ impl SubprocessFixture {
         }
     }
 
-    /// Find the workspace root by looking for Cargo.toml with [workspace]
     fn find_workspace_root() -> anyhow::Result<PathBuf> {
         let current_dir = std::env::current_dir()?;
         let mut search_dir = current_dir.as_path();
 
-        // Search up to 5 levels up for workspace root
         for _ in 0..5 {
             let cargo_toml = search_dir.join("Cargo.toml");
             if cargo_toml.exists() {
-                // Check if this is the workspace root by looking for [workspace] section
                 let contents = std::fs::read_to_string(&cargo_toml)?;
                 if contents.contains("[workspace]") {
                     return Ok(search_dir.to_path_buf());
                 }
             }
 
-            // Move up one directory
-            if let Some(parent) = search_dir.parent() {
-                search_dir = parent;
-            } else {
-                break;
-            }
+            search_dir = match search_dir.parent() {
+                Some(parent) => parent,
+                None => break,
+            };
         }
 
-        // Fallback: assume we're in a subdirectory of the workspace
-        // Look for tycode-cli directory as a sibling or parent
         let current_dir = std::env::current_dir()?;
 
-        // If we're in tycode-cli/tests, go up two levels
-        if current_dir.ends_with("tests")
-            && current_dir
-                .parent()
-                .map_or(false, |p| p.ends_with("tycode-cli"))
-        {
-            if let Some(workspace) = current_dir.parent().and_then(|p| p.parent()) {
-                return Ok(workspace.to_path_buf());
+        if current_dir.ends_with("tests") {
+            let parent = current_dir.parent();
+            if let Some(p) = parent {
+                if p.ends_with("tycode-cli") {
+                    if let Some(workspace) = p.parent() {
+                        return Ok(workspace.to_path_buf());
+                    }
+                }
             }
         }
 
-        // If we're in tycode-cli, go up one level
         if current_dir.ends_with("tycode-cli") {
             if let Some(workspace) = current_dir.parent() {
                 return Ok(workspace.to_path_buf());
             }
         }
 
-        // Last resort: use current directory
         Ok(current_dir)
     }
 
-    /// Create a new subprocess test fixture with custom initial settings
     pub fn with_settings(initial_settings: Option<&str>) -> anyhow::Result<Self> {
-        // Create a unique temp directory with random component
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
@@ -173,7 +334,6 @@ impl SubprocessFixture {
         std::fs::create_dir_all(&temp_dir)?;
         let settings_path = temp_dir.join("settings.toml");
 
-        // Create initial settings file
         let settings_content = initial_settings.unwrap_or(
             r#"
 active_provider = "default"
@@ -189,7 +349,6 @@ mode = "auto"
         );
         std::fs::write(&settings_path, settings_content)?;
 
-        // Get the tycode binary path
         let tycode_binary = Self::get_tycode_binary()?;
         println!("Found binary: {tycode_binary:?}");
 
@@ -210,12 +369,10 @@ mode = "auto"
 
         let (tx, rx) = mpsc::channel();
 
-        // Spawn thread to read stdout
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
                 if let Ok(line) = line {
-                    // Debug output for test development
                     if std::env::var("TEST_DEBUG").is_ok() {
                         eprintln!("RECV: {}", line);
                     }
@@ -233,7 +390,6 @@ mode = "auto"
         })
     }
 
-    /// Send a JSON message to the subprocess
     pub fn send_message(&mut self, msg: Value) -> anyhow::Result<()> {
         let json = serde_json::to_string(&msg)?;
         if std::env::var("TEST_DEBUG").is_ok() {
@@ -244,13 +400,39 @@ mode = "auto"
         Ok(())
     }
 
-    /// Receive a message
+    pub fn send(&mut self, msg: OutgoingMessage) -> anyhow::Result<()> {
+        let json = serde_json::to_string(&msg)?;
+        if std::env::var("TEST_DEBUG").is_ok() {
+            eprintln!("SEND: {}", json);
+        }
+        writeln!(self.stdin, "{}", json)?;
+        self.stdin.flush()?;
+        Ok(())
+    }
+
+    pub fn send_chat(&mut self, message: &str) -> anyhow::Result<()> {
+        self.send(OutgoingMessage::Chat {
+            message: message.to_string(),
+        })
+    }
+
     pub fn receive_message(&self) -> anyhow::Result<Value> {
         let line = self.rx.recv()?;
         Ok(serde_json::from_str(&line)?)
     }
 
-    /// Wait for the Ready message
+    pub fn receive(&self) -> anyhow::Result<IncomingMessage> {
+        let line = self.rx.recv()?;
+        Ok(serde_json::from_str(&line)?)
+    }
+
+    pub fn try_receive(&self) -> Option<IncomingMessage> {
+        match self.rx.try_recv() {
+            Ok(line) => serde_json::from_str(&line).ok(),
+            Err(_) => None,
+        }
+    }
+
     pub fn wait_for_ready(&self) -> anyhow::Result<Value> {
         loop {
             let msg = self.receive_message()?;
@@ -260,21 +442,58 @@ mode = "auto"
         }
     }
 
-    /// Wait for a specific message type
+    pub fn wait_for_ready_typed(&self) -> anyhow::Result<()> {
+        loop {
+            let msg = self.receive()?;
+            if msg.is_ready() {
+                return Ok(());
+            }
+        }
+    }
+
+    pub fn collect_retry_events_and_response(
+        &self,
+    ) -> anyhow::Result<(Vec<RetryAttemptData>, IncomingMessage)> {
+        let mut retry_events = Vec::new();
+        let max_messages = 20;
+
+        for _ in 0..max_messages {
+            let msg = self.receive()?;
+
+            if let Some(retry_data) = msg.as_retry_event() {
+                retry_events.push(retry_data.clone());
+            } else if msg.is_response() || msg.is_error() {
+                return Ok((retry_events, msg));
+            }
+        }
+
+        anyhow::bail!(
+            "Did not receive response or error after {} messages",
+            max_messages
+        )
+    }
+
+    pub fn wait_for_response_or_error(&self) -> anyhow::Result<IncomingMessage> {
+        loop {
+            let msg = self.receive()?;
+            if msg.is_response() || msg.is_error() {
+                return Ok(msg);
+            }
+        }
+    }
+
     pub fn wait_for_message_type(&self, msg_type: &str) -> anyhow::Result<Value> {
         loop {
             let msg = self.receive_message()?;
             if msg.get("type") == Some(&json!(msg_type)) {
                 return Ok(msg);
             }
-            // Log unexpected messages for debugging
             if std::env::var("TEST_DEBUG").is_ok() {
                 eprintln!("Unexpected message type: {:?}", msg.get("type"));
             }
         }
     }
 
-    /// Try to receive any pending message without blocking
     pub fn try_receive_message(&self) -> Option<Value> {
         match self.rx.try_recv() {
             Ok(line) => serde_json::from_str(&line).ok(),
@@ -282,65 +501,56 @@ mode = "auto"
         }
     }
 
-    /// Drain all pending messages
     pub fn drain_messages(&self) {
-        while self.try_receive_message().is_some() {
-            // Keep draining
-        }
+        while self.try_receive_message().is_some() {}
     }
 
-    /// Send a chat message and wait for response
     pub fn send_chat_message(&mut self, content: &str) -> anyhow::Result<Value> {
         self.send_message(json!({
             "type": "Chat",
             "message": content
         }))?;
 
-        // Commands starting with "/" typically generate Event messages with event: "system"
-        // Regular chat messages generate Response messages
         if content.starts_with("/") {
-            // Wait for system Event message
             loop {
                 let msg = self.receive_message()?;
                 if msg.get("type") == Some(&json!("Event")) {
-                    if msg.get("event") == Some(&json!("system")) {
-                        // Convert Event format to Response format for compatibility
-                        if let Some(data) = msg.get("data") {
-                            if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
-                                return Ok(json!({
-                                    "type": "Response",
-                                    "content": content
-                                }));
-                            }
-                        }
+                    if msg.get("event") != Some(&json!("system")) {
+                        continue;
                     }
+                    let data = match msg.get("data") {
+                        Some(d) => d,
+                        None => continue,
+                    };
+                    let content = match data.get("content").and_then(|c| c.as_str()) {
+                        Some(c) => c,
+                        None => continue,
+                    };
+                    return Ok(json!({
+                        "type": "Response",
+                        "content": content
+                    }));
                 } else if msg.get("type") == Some(&json!("Response")) {
-                    // Some commands might still return Response
                     return Ok(msg);
                 } else if msg.get("type") == Some(&json!("ToolResult")) {
-                    // Tool results are what we check for security blocks
                     return Ok(msg);
                 }
             }
         } else {
-            // Wait for Response
             self.wait_for_message_type("Response")
         }
     }
 
-    /// Create a test file in the workspace
     pub fn create_test_file(&self, name: &str, content: &str) -> anyhow::Result<PathBuf> {
         let file_path = self.temp_dir.join(name);
         std::fs::write(&file_path, content)?;
         Ok(file_path)
     }
 
-    /// Check if a file exists in the workspace
     pub fn file_exists(&self, name: &str) -> bool {
         self.temp_dir.join(name).exists()
     }
 
-    /// Read a file from the workspace
     pub fn read_file(&self, name: &str) -> anyhow::Result<String> {
         Ok(std::fs::read_to_string(self.temp_dir.join(name))?)
     }
@@ -348,26 +558,20 @@ mode = "auto"
 
 impl Drop for SubprocessFixture {
     fn drop(&mut self) {
-        // Kill the process and wait for it to exit
         let _ = self.process.kill();
         let _ = self.process.wait();
 
-        // Small delay to ensure process cleanup
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // Clean up temp directory
         let _ = std::fs::remove_dir_all(&self.temp_dir);
     }
 }
 
-/// Helper to check if a message is an error response
 pub fn is_error_response(message: &Value) -> bool {
-    // Check if the message type is "Error"
     if message.get("type") == Some(&json!("Error")) {
         return true;
     }
 
-    // Check if it's a ToolResult with success: false
     if message.get("type") == Some(&json!("ToolResult")) {
         if message.get("success") == Some(&json!(false)) {
             return true;
@@ -377,24 +581,25 @@ pub fn is_error_response(message: &Value) -> bool {
     false
 }
 
-/// Helper to check if a message is a security block
 pub fn is_security_blocked(message: &Value) -> bool {
-    // Security blocks come as ToolResult messages with success: false and security-related error
-    if message.get("type") == Some(&json!("ToolResult")) {
-        if message.get("success") == Some(&json!(false)) {
-            if let Some(error) = message.get("error").and_then(|e| e.as_str()) {
-                // Check if the error message indicates a security block
-                return error.contains("Security:")
-                    || error.contains("denied by security")
-                    || error.contains("Risk level:");
-            }
-        }
+    if message.get("type") != Some(&json!("ToolResult")) {
+        return false;
     }
-
-    false
+    
+    if message.get("success") != Some(&json!(false)) {
+        return false;
+    }
+    
+    match message.get("error").and_then(|e| e.as_str()) {
+        Some(error) => {
+            error.contains("Security:")
+                || error.contains("denied by security")
+                || error.contains("Risk level:")
+        }
+        None => false,
+    }
 }
 
-/// Helper to extract security info from a ToolResult security block
 pub fn extract_security_info(message: &Value) -> Option<SecurityInfo> {
     if !is_security_blocked(message) {
         return None;
@@ -403,8 +608,6 @@ pub fn extract_security_info(message: &Value) -> Option<SecurityInfo> {
     let tool_name = message.get("tool_name")?.as_str()?.to_string();
     let error = message.get("error")?.as_str()?;
 
-    // Parse the error message for security details
-    // Format is typically: "Security: <description>\nRisk level: <level>\nRisk: <explanation>"
     let mut risk_level = "unknown".to_string();
     let mut description = error.to_string();
     let mut risk_explanation = None;
@@ -427,7 +630,6 @@ pub fn extract_security_info(message: &Value) -> Option<SecurityInfo> {
     })
 }
 
-/// Helper struct for security information
 #[derive(Debug, Clone)]
 pub struct SecurityInfo {
     pub tool_name: String,
@@ -436,39 +638,46 @@ pub struct SecurityInfo {
     pub risk_explanation: Option<String>,
 }
 
-/// Helper to parse security status from /security status command response
 pub fn parse_security_status(message: &Value) -> Option<SecurityStatus> {
     if message.get("type") != Some(&json!("Response")) {
         return None;
     }
 
     let content = message.get("content")?.as_str()?;
-
-    // Parse the structured response from /security status
-    // Format: "Security Status\n  Mode: <mode>\n..." or "Current security mode: <mode>"
     let mut mode = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        // Try parsing from "/security status" format (with optional leading spaces)
-        if let Some(mode_str) = trimmed.strip_prefix("Mode: ") {
-            mode = Some(mode_str.to_string());
+        
+        if let Some(mode_str) = trimmed.strip_prefix("Mode:") {
+            mode = Some(mode_str.trim().to_string());
             break;
         }
-        // Try parsing from "/security mode" (without args) format
-        if trimmed.contains("Current security mode:") {
-            // Extract mode from "Current security mode: All" format
-            if let Some(mode_str) = trimmed.split(':').nth(1) {
-                mode = Some(mode_str.trim().to_string());
+        
+        let lower = trimmed.to_lowercase();
+        if !lower.contains("mode") {
+            continue;
+        }
+        
+        if let Some(colon_pos) = trimmed.find(':') {
+            let mode_value = trimmed[colon_pos + 1..].trim();
+            if !mode_value.is_empty() {
+                mode = Some(mode_value.to_string());
                 break;
             }
+        }
+    }
+
+    if mode.is_none() && !content.contains('\n') {
+        let trimmed = content.trim();
+        if matches!(trimmed, "Auto" | "All" | "Critical" | "None") {
+            mode = Some(trimmed.to_string());
         }
     }
 
     mode.map(|m| SecurityStatus { mode: m })
 }
 
-/// Helper struct for security status
 #[derive(Debug, Clone)]
 pub struct SecurityStatus {
     pub mode: String,

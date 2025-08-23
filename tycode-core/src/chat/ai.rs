@@ -444,7 +444,7 @@ async fn send_request_with_retry(
     state: &mut ActorState,
     request: ConversationRequest,
 ) -> Result<ConversationResponse> {
-    const MAX_RETRIES: u32 = 3;
+    const MAX_RETRIES: u32 = 1000;
     const INITIAL_BACKOFF_MS: u64 = 100;
     const MAX_BACKOFF_MS: u64 = 1000;
     const BACKOFF_MULTIPLIER: f64 = 2.0;

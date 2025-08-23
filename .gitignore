@@ -12,3 +12,6 @@ Cargo.lock
 
 # OSX indexing
 .DS_Store
+
+# Node dependencies
+node_modules/
