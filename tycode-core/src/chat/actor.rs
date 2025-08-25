@@ -343,6 +343,13 @@ async fn create_provider(
                 crate::settings::config::MockBehaviorConfig::AlwaysError => {
                     MockBehavior::AlwaysNonRetryableError
                 }
+                crate::settings::config::MockBehaviorConfig::ToolUse {
+                    tool_name,
+                    tool_arguments,
+                } => MockBehavior::ToolUse {
+                    tool_name: tool_name.clone(),
+                    tool_arguments: tool_arguments.clone(),
+                },
             };
 
             Ok(Box::new(MockProvider::new(mock_behavior)))

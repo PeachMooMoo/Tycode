@@ -117,7 +117,10 @@ impl FileAccessManager {
         directory_path: &str,
         pattern: &str,
         file_pattern: Option<&str>,
-    ) -> Result<Vec<SearchResult>> {
+        max_results: usize,
+        include_context: bool,
+        context_lines: usize,
+    ) -> Result<(Vec<SearchResult>, bool)> {
         let dir_path = self.validate_path(directory_path)?;
 
         let regex =
@@ -130,6 +133,7 @@ impl FileAccessManager {
         };
 
         let mut results = Vec::new();
+        let mut truncated = false;
 
         // Walk through all files in directory
         for entry in WalkDir::new(&dir_path) {
@@ -140,7 +144,7 @@ impl FileAccessManager {
 
             let path = entry.path();
 
-            // Check if file matches file pattern if provided
+            // Skip if file doesn't match pattern
             if let Some(ref file_regex) = file_regex {
                 let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if !file_regex.is_match(file_name) {
@@ -148,38 +152,85 @@ impl FileAccessManager {
                 }
             }
 
-            // Read file and search for pattern
-            if let Ok(content) = fs::read_to_string(path).await {
-                for (line_number, line) in content.lines().enumerate() {
-                    if regex.is_match(line) {
-                        // Get context (2 lines before and after)
-                        let lines: Vec<&str> = content.lines().collect();
-                        let start = line_number.saturating_sub(2);
-                        let end = (line_number + 3).min(lines.len());
-
-                        let context_before = lines[start..line_number]
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect();
-
-                        let context_after = lines[(line_number + 1)..end]
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect();
-
-                        results.push(SearchResult {
-                            path: path.to_path_buf(),
-                            line_number: line_number + 1, // 1-indexed
-                            line_content: line.to_string(),
-                            context_before,
-                            context_after,
-                        });
-                    }
-                }
+            // Process matches in this file
+            let found_truncated = self.search_in_file(
+                path,
+                &regex,
+                include_context,
+                context_lines,
+                max_results,
+                &mut results,
+            ).await?;
+            
+            if found_truncated {
+                truncated = true;
+                break;
             }
         }
 
-        Ok(results)
+        Ok((results, truncated))
+    }
+
+    async fn search_in_file(
+        &self,
+        path: &Path,
+        regex: &Regex,
+        include_context: bool,
+        context_lines: usize,
+        max_results: usize,
+        results: &mut Vec<SearchResult>,
+    ) -> Result<bool> {
+        // Read file content
+        let content = match fs::read_to_string(path).await {
+            Ok(c) => c,
+            Err(_) => return Ok(false),
+        };
+
+        let lines: Vec<&str> = if include_context {
+            content.lines().collect()
+        } else {
+            vec![]
+        };
+
+        for (line_number, line) in content.lines().enumerate() {
+            if !regex.is_match(line) {
+                continue;
+            }
+
+            // Check if we've hit the result limit
+            if results.len() >= max_results {
+                return Ok(true);
+            }
+
+            let (context_before, context_after) = if !include_context {
+                (None, None)
+            } else {
+                let start = line_number.saturating_sub(context_lines);
+                let end = (line_number + context_lines + 1).min(lines.len());
+
+                let before = lines[start..line_number]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                let after = lines[(line_number + 1)..end]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                (Some(before), Some(after))
+            };
+
+            results.push(SearchResult {
+                path: path.to_path_buf(),
+                line_number: line_number + 1, // 1-indexed
+                line_content: line.to_string(),
+                context_before,
+                context_after,
+            });
+        }
+
+        Ok(false)
     }
 
     pub fn workspace_roots(&self) -> &[PathBuf] {
@@ -348,6 +399,206 @@ pub struct SearchResult {
     pub path: PathBuf,
     pub line_number: usize,
     pub line_content: String,
-    pub context_before: Vec<String>,
-    pub context_after: Vec<String>,
+    pub context_before: Option<Vec<String>>,
+    pub context_after: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    async fn setup_test_dir() -> (TempDir, FileAccessManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = FileAccessManager::new(vec![temp_dir.path().to_path_buf()]);
+        (temp_dir, manager)
+    }
+
+    #[tokio::test]
+    async fn test_search_files_default_no_context() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test file
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, "line 1\nmatch line\nline 3\nanother match\nline 5")
+            .await
+            .unwrap();
+
+        let (results, truncated) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                None,
+                100,
+                false,
+                2,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(!truncated);
+        
+        // Verify no context included
+        assert!(results[0].context_before.is_none());
+        assert!(results[0].context_after.is_none());
+        assert!(results[1].context_before.is_none());
+        assert!(results[1].context_after.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_search_files_with_context() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test file
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, "line 1\nline 2\nmatch line\nline 4\nline 5")
+            .await
+            .unwrap();
+
+        let (results, _) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                None,
+                100,
+                true,
+                2,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        
+        // Verify context included
+        let context_before = results[0].context_before.as_ref().unwrap();
+        assert_eq!(context_before.len(), 2);
+        assert_eq!(context_before[0], "line 1");
+        assert_eq!(context_before[1], "line 2");
+        
+        let context_after = results[0].context_after.as_ref().unwrap();
+        assert_eq!(context_after.len(), 2);
+        assert_eq!(context_after[0], "line 4");
+        assert_eq!(context_after[1], "line 5");
+    }
+
+    #[tokio::test]
+    async fn test_search_files_max_results_limit() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test file with many matches
+        let mut content = String::new();
+        for i in 0..200 {
+            content.push_str(&format!("match line {}\n", i));
+        }
+        
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, content).await.unwrap();
+
+        let (results, truncated) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                None,
+                50,
+                false,
+                2,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 50);
+        assert!(truncated);
+    }
+
+    #[tokio::test]
+    async fn test_search_files_default_limit() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test file with many matches
+        let mut content = String::new();
+        for i in 0..150 {
+            content.push_str(&format!("match line {}\n", i));
+        }
+        
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, content).await.unwrap();
+
+        let (results, truncated) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                None,
+                100,
+                false,
+                2,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 100);
+        assert!(truncated);
+    }
+
+    #[tokio::test]
+    async fn test_search_files_file_pattern() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test files with different extensions
+        fs::write(temp_dir.path().join("test.rs"), "match in rust").await.unwrap();
+        fs::write(temp_dir.path().join("test.txt"), "match in text").await.unwrap();
+        fs::write(temp_dir.path().join("test.md"), "match in markdown").await.unwrap();
+
+        let (results, _) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                Some(r".*\.rs$"),
+                100,
+                false,
+                2,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].path.to_str().unwrap().ends_with("test.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_search_files_custom_context_lines() {
+        let (temp_dir, manager) = setup_test_dir().await;
+        
+        // Create test file
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, "1\n2\n3\n4\nmatch\n6\n7\n8\n9")
+            .await
+            .unwrap();
+
+        let (results, _) = manager
+            .search_files(
+                temp_dir.path().to_str().unwrap(),
+                "match",
+                None,
+                100,
+                true,
+                3,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        
+        let context_before = results[0].context_before.as_ref().unwrap();
+        assert_eq!(context_before.len(), 3);
+        assert_eq!(context_before[0], "2");
+        assert_eq!(context_before[1], "3");
+        assert_eq!(context_before[2], "4");
+        
+        let context_after = results[0].context_after.as_ref().unwrap();
+        assert_eq!(context_after.len(), 3);
+        assert_eq!(context_after[0], "6");
+        assert_eq!(context_after[1], "7");
+        assert_eq!(context_after[2], "8");
+    }
 }

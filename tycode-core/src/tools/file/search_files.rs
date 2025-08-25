@@ -84,7 +84,8 @@ impl ToolExecutor for SearchFilesTool {
         let max_results = request.arguments
             .get("max_results")
             .and_then(|v| v.as_u64())
-            .map(|v| v as usize);
+            .map(|v| v as usize)
+            .unwrap_or(100);
         
         let include_context = request.arguments
             .get("include_context")
@@ -94,7 +95,8 @@ impl ToolExecutor for SearchFilesTool {
         let context_lines = request.arguments
             .get("context_lines")
             .and_then(|v| v.as_u64())
-            .map(|v| v as usize);
+            .map(|v| v as usize)
+            .unwrap_or(2);
 
         // Use FileAccessManager for secure file searching
         let (results, truncated) = self

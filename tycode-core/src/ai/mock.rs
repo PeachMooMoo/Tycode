@@ -12,6 +12,11 @@ pub enum MockBehavior {
     AlwaysRetryableError,
     /// Always return a non-retryable error
     AlwaysNonRetryableError,
+    /// Return a tool use response
+    ToolUse {
+        tool_name: String,
+        tool_arguments: String,
+    },
 }
 
 /// Mock AI provider for testing
@@ -96,6 +101,27 @@ impl AiProvider for MockProvider {
             MockBehavior::AlwaysNonRetryableError => Err(AiError::Terminal(anyhow::anyhow!(
                 "Mock non-retryable error"
             ))),
+            MockBehavior::ToolUse {
+                tool_name,
+                tool_arguments,
+            } => {
+                // Return a tool use response with text (like real models do)
+                let tool_use = ToolUseData {
+                    id: format!("tool_{}", tool_name),
+                    name: tool_name.clone(),
+                    arguments: serde_json::from_str(tool_arguments)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                };
+                
+                Ok(ConversationResponse {
+                    content: Content::new(vec![
+                        ContentBlock::Text(format!("I'll use the {} tool to help with this task.", tool_name)),
+                        ContentBlock::ToolUse(tool_use),
+                    ]),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::ToolUse,
+                })
+            }
         }
     }
 }

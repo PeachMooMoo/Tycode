@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -208,53 +208,41 @@ impl SubprocessFixture {
     }
 
     fn get_tycode_binary() -> anyhow::Result<PathBuf> {
-        if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
-            let binary = Path::new(&target_dir).join("debug").join("tycode");
-            if binary.exists() {
-                return Ok(binary.canonicalize()?);
-            }
-        }
-
-        if let Ok(current_exe) = std::env::current_exe() {
-            let target_dir = current_exe
-                .parent()
-                .and_then(|p| p.parent())
-                .and_then(|p| p.parent());
-            
-            if let Some(target_dir) = target_dir {
-                for profile in &["debug", "release"] {
-                    let binary = target_dir.join(profile).join("tycode");
-                    if binary.exists() {
-                        return Ok(binary.canonicalize()?);
-                    }
-                }
-            }
-        }
-
-        let current_dir = std::env::current_dir()?;
-        let mut search_dir = current_dir.as_path();
-
-        for _ in 0..3 {
-            let target_dir = search_dir.join("target");
-            if target_dir.exists() {
-                for profile in &["debug", "release"] {
-                    let binary = target_dir.join(profile).join("tycode");
-                    if binary.exists() {
-                        return Ok(binary.canonicalize()?);
-                    }
-                }
-            }
-
-            search_dir = match search_dir.parent() {
-                Some(parent) => parent,
-                None => break,
-            };
-        }
-
-        eprintln!("tycode binary not found, attempting to build...");
-
         let workspace_root = Self::find_workspace_root()?;
+        let binary_path = workspace_root.join("target").join("debug").join("tycode");
+        
+        // Check if binary exists and how old it is
+        let should_rebuild = if binary_path.exists() {
+            // Get binary age
+            let metadata = std::fs::metadata(&binary_path)?;
+            let modified = metadata.modified()?;
+            let age = std::time::SystemTime::now().duration_since(modified)?;
+            
+            // Rebuild if older than 60 seconds (configurable via env var)
+            let max_age_secs = std::env::var("TYCODE_TEST_BINARY_MAX_AGE")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60);
+            
+            if age.as_secs() > max_age_secs {
+                eprintln!("Binary is {} seconds old (max: {}), rebuilding...", 
+                    age.as_secs(), max_age_secs);
+                true
+            } else {
+                eprintln!("Using existing binary ({} seconds old)", age.as_secs());
+                false
+            }
+        } else {
+            eprintln!("Binary not found, building...");
+            true
+        };
 
+        if !should_rebuild {
+            return Ok(binary_path);
+        }
+
+        // Build the binary (cargo will handle incremental compilation)
+        eprintln!("Rebuilding binary...");
         let output = Command::new("cargo")
             .args(&["build", "--bin", "tycode", "-p", "tycode-cli"])
             .current_dir(&workspace_root)
@@ -267,16 +255,10 @@ impl SubprocessFixture {
             );
         }
 
-        let target_dir = workspace_root.join("target");
-        let binary = target_dir.join("debug").join("tycode");
-
-        if binary.exists() {
-            Ok(binary.canonicalize()?)
+        if binary_path.exists() {
+            Ok(binary_path)
         } else {
-            anyhow::bail!(
-                "tycode binary not found after building. Expected at: {:?}",
-                binary
-            );
+            anyhow::bail!("Binary not found after build at: {:?}", binary_path)
         }
     }
 

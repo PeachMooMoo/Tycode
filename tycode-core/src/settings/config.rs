@@ -44,9 +44,15 @@ pub enum ProviderConfig {
 #[serde(rename_all = "snake_case")]
 pub enum MockBehaviorConfig {
     Success,
-    RetryThenSuccess { errors_before_success: usize },
+    RetryThenSuccess {
+        errors_before_success: usize,
+    },
     AlwaysRetryError,
     AlwaysError,
+    ToolUse {
+        tool_name: String,
+        tool_arguments: String,
+    },
 }
 
 impl Default for MockBehaviorConfig {
