@@ -37,9 +37,8 @@ regex = { version = "1.10" }
 walkdir = { version = "2.4" }
 dirs = { version = "5.0" }
 
-# AWS SDK with minimal features
 aws-config = { version = "1.1.1", default-features = false }
-aws-sdk-bedrockruntime = { version = "1.4.0", default-features = false }
+aws-sdk-bedrockruntime = "1.105.0"
 aws-smithy-types = { version = "1", default-features = false, features = ["serde-deserialize", "serde-serialize"] }
 aws-smithy-async = { version = "1", default-features = false }
 aws-smithy-runtime-api = { version = "1", default-features = false }

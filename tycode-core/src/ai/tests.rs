@@ -1,4 +1,4 @@
-use crate::ai::{provider::AiProvider, types::*};
+use crate::ai::{model::Model, provider::AiProvider, types::*};
 use anyhow::Result;
 
 pub async fn test_hello_world_model<P: AiProvider>(provider: &P, model: Model) -> Result<()> {

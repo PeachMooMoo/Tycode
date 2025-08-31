@@ -5,9 +5,7 @@ use crate::ai::{
     ToolUseData,
 };
 use crate::chat::{
-    events::{
-        ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo, ModelSource,
-    },
+    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo},
     state::SharedChatState,
 };
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
@@ -55,8 +53,7 @@ fn add_error_message(state: &SharedChatState, error: String) {
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
         // Prepare the AI request with all necessary context
-        let (request, context_info, model_settings, model_source) =
-            prepare_ai_request(state).await?;
+        let (request, context_info, model_settings) = prepare_ai_request(state).await?;
 
         // Send request and get response
         let response = match send_request_with_retry(state, request).await {
@@ -68,8 +65,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         };
 
         // Process the response and update conversation
-        let tool_calls =
-            process_ai_response(state, response, model_settings, model_source, context_info);
+        let tool_calls = process_ai_response(state, response, model_settings, context_info);
 
         // If there are tool calls, execute them and continue the loop
         if !tool_calls.is_empty() {
@@ -89,12 +85,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
 async fn prepare_ai_request(
     state: &mut ActorState,
-) -> Result<(
-    ConversationRequest,
-    Option<ContextInfo>,
-    ModelSettings,
-    ModelSource,
-)> {
+) -> Result<(ConversationRequest, Option<ContextInfo>, ModelSettings)> {
     let current = current_agent(state);
 
     // Prepare tools
@@ -122,8 +113,7 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
-    // Determine model settings
-    let (model_settings, model_source) = determine_model_settings_and_source(state, current);
+    let model_settings = current.agent.preferred_model();
     let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {
@@ -136,7 +126,7 @@ async fn prepare_ai_request(
 
     info!(?request, "AI request");
 
-    Ok((request, context_info, model_settings, model_source))
+    Ok((request, context_info, model_settings))
 }
 
 fn create_context_info(message_context: &MessageContext) -> Option<ContextInfo> {
@@ -165,7 +155,6 @@ fn process_ai_response(
     state: &mut ActorState,
     response: ConversationResponse,
     model_settings: ModelSettings,
-    model_source: ModelSource,
     context_info: Option<ContextInfo>,
 ) -> Vec<ToolUseData> {
     let content = response.content.clone();
@@ -186,7 +175,6 @@ fn process_ai_response(
             tool_calls: tool_calls.clone(),
             model_info: Some(ModelInfo {
                 model: model_settings.model,
-                source: model_source,
             }),
             context_info,
             token_usage: Some(response.usage),
@@ -429,15 +417,6 @@ async fn build_message_context(state: &ActorState) -> MessageContext {
     }
 
     context
-}
-
-fn determine_model_settings_and_source(
-    _state: &ActorState,
-    agent: &ActiveAgent,
-) -> (ModelSettings, ModelSource) {
-    // For now, we just use the agent's preferred model
-    // In the future, we could allow model configuration per provider
-    (agent.agent.preferred_model(), ModelSource::AgentPreference)
 }
 
 async fn send_request_with_retry(

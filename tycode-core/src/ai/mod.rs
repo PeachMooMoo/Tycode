@@ -2,6 +2,7 @@ pub mod bedrock;
 pub mod error;
 pub mod json;
 pub mod mock;
+pub mod model;
 pub mod provider;
 pub mod types;
 

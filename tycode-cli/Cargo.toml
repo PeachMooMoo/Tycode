@@ -16,10 +16,6 @@ tycode-core = { path = "../tycode-core" }
 # Async runtime
 tokio = { workspace = true }
 
-# AWS dependencies (for CLI setup)
-aws-config = { workspace = true }
-aws-sdk-bedrockruntime = { workspace = true }
-
 # CLI dependencies
 rustyline = "14.0"
 colored = "2.1"

@@ -1,5 +1,6 @@
 use crate::agents::{Agent, ToolType};
-use crate::ai::types::{Model, ModelSettings};
+use crate::ai::model::Model;
+use crate::ai::types::ModelSettings;
 
 pub struct DesignAgent;
 

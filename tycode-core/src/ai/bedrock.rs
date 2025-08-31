@@ -10,8 +10,11 @@ use aws_sdk_bedrockruntime::{
 use aws_smithy_types::Blob;
 use serde_json::json;
 
-use crate::ai::json::{from_doc, to_doc};
 use crate::ai::{error::AiError, provider::AiProvider, types::*};
+use crate::ai::{
+    json::{from_doc, to_doc},
+    model::Model,
+};
 
 #[derive(Clone)]
 pub struct BedrockProvider {
@@ -29,6 +32,7 @@ impl BedrockProvider {
             Model::ClaudeOpus4 => "us.anthropic.claude-opus-4-20250514-v1:0",
             Model::ClaudeSonnet4 => "us.anthropic.claude-sonnet-4-20250514-v1:0",
             Model::ClaudeSonnet37 => "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            Model::GptOss120b => "openai.gpt-oss-120b-1:0",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in bedrock",
@@ -206,6 +210,8 @@ impl AiProvider for BedrockProvider {
             Model::ClaudeOpus41,
             Model::ClaudeSonnet4,
             Model::ClaudeOpus4,
+            Model::ClaudeSonnet37,
+            Model::GptOss120b,
         ]
     }
 

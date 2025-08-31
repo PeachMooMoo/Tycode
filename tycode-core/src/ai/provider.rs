@@ -1,4 +1,4 @@
-use crate::ai::{error::AiError, types::*};
+use crate::ai::{error::AiError, model::Model, types::*};
 
 #[async_trait::async_trait]
 pub trait AiProvider: Send + Sync {

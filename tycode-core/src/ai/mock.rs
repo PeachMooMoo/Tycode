@@ -1,4 +1,4 @@
-use crate::ai::{error::AiError, provider::AiProvider, types::*};
+use crate::ai::{error::AiError, model::Model, provider::AiProvider, types::*};
 use std::sync::{Arc, Mutex};
 
 /// Mock behavior for the mock provider
@@ -50,11 +50,7 @@ impl MockProvider {
 #[async_trait::async_trait]
 impl AiProvider for MockProvider {
     fn supported_models(&self) -> Vec<Model> {
-        vec![
-            Model::ClaudeSonnet4,
-            Model::ClaudeSonnet35V2,
-            Model::ClaudeHaiku35,
-        ]
+        vec![Model::ClaudeSonnet4, Model::ClaudeSonnet37]
     }
 
     async fn converse(
@@ -112,10 +108,13 @@ impl AiProvider for MockProvider {
                     arguments: serde_json::from_str(tool_arguments)
                         .unwrap_or_else(|_| serde_json::json!({})),
                 };
-                
+
                 Ok(ConversationResponse {
                     content: Content::new(vec![
-                        ContentBlock::Text(format!("I'll use the {} tool to help with this task.", tool_name)),
+                        ContentBlock::Text(format!(
+                            "I'll use the {} tool to help with this task.",
+                            tool_name
+                        )),
                         ContentBlock::ToolUse(tool_use),
                     ]),
                     usage: TokenUsage::new(10, 10),

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
+use crate::ai::model::Model;
+
 #[derive(Debug, Clone)]
 pub struct MessageContext {
     pub working_directories: Vec<PathBuf>,
@@ -172,66 +174,6 @@ impl ModelSettings {
             }
         }
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Model {
-    ClaudeOpus41,
-    ClaudeOpus4,
-    ClaudeSonnet4,
-    ClaudeSonnet37,
-    ClaudeHaiku35,
-    ClaudeSonnet35V2,
-    ClaudeSonnet35,
-    ClaudeHaiku3,
-}
-
-impl Model {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::ClaudeOpus41 => "claude-opus-4-1",
-            Self::ClaudeOpus4 => "claude-opus-4",
-            Self::ClaudeSonnet4 => "claude-sonnet-4",
-            Self::ClaudeSonnet37 => "claude-sonnet-3-7",
-            Self::ClaudeHaiku35 => "claude-haiku-3-5",
-            Self::ClaudeSonnet35V2 => "claude-sonnet-3-5-v2",
-            Self::ClaudeSonnet35 => "claude-sonnet-3-5",
-            Self::ClaudeHaiku3 => "claude-haiku-3",
-        }
-    }
-
-    pub fn from_name(s: &str) -> Option<Self> {
-        match s {
-            "claude-opus-4-1" => Some(Self::ClaudeOpus41),
-            "claude-opus-4" => Some(Self::ClaudeOpus4),
-            "claude-sonnet-4" => Some(Self::ClaudeSonnet4),
-            "claude-sonnet-3-7" => Some(Self::ClaudeSonnet37),
-            "claude-haiku-3-5" => Some(Self::ClaudeHaiku35),
-            "claude-sonnet-3-5-v2" => Some(Self::ClaudeSonnet35V2),
-            "claude-sonnet-3-5" => Some(Self::ClaudeSonnet35),
-            "claude-haiku-3" => Some(Self::ClaudeHaiku3),
-            _ => None,
-        }
-    }
-
-    pub fn all_models() -> Vec<Self> {
-        vec![
-            Self::ClaudeOpus41,
-            Self::ClaudeOpus4,
-            Self::ClaudeSonnet4,
-            Self::ClaudeSonnet37,
-            Self::ClaudeHaiku35,
-            Self::ClaudeSonnet35V2,
-            Self::ClaudeSonnet35,
-            Self::ClaudeHaiku3,
-        ]
-    }
-}
-
-impl Default for Model {
-    fn default() -> Self {
-        Model::ClaudeSonnet4
     }
 }
 
