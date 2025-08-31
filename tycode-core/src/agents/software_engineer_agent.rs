@@ -1,4 +1,5 @@
-use crate::agents::{Agent, ToolType};
+use crate::agents::agent::Agent;
+use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::types::ModelSettings;
 

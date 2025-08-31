@@ -1,5 +1,7 @@
-use crate::agents::ToolType;
-use crate::ai::types::{Message, ModelSettings};
+use crate::{
+    agents::tool_type::ToolType,
+    ai::types::{Message, ModelSettings},
+};
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;

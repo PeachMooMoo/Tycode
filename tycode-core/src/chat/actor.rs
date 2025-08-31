@@ -1,15 +1,20 @@
-use crate::agents::{ActiveAgent, SoftwareEngineerAgent};
-use crate::ai::{
-    provider::AiProvider,
-    types::{Content, Message, MessageRole},
-};
-use crate::chat::{
-    ai,
-    events::{ChatEvent, ChatMessage, MessageSender},
-    state::{ChatConfig, SharedChatState},
-};
 use crate::security::SecurityManager;
 use crate::settings::{ProviderConfig, SettingsManager};
+use crate::{
+    agents::agent::ActiveAgent,
+    ai::{
+        provider::AiProvider,
+        types::{Content, Message, MessageRole},
+    },
+};
+use crate::{
+    agents::software_engineer_agent::SoftwareEngineerAgent,
+    chat::{
+        ai,
+        events::{ChatEvent, ChatMessage, MessageSender},
+        state::{ChatConfig, SharedChatState},
+    },
+};
 use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
 use std::collections::HashSet;

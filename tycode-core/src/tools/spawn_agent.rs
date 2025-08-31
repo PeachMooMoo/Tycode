@@ -1,4 +1,4 @@
-use crate::agents::AgentCatalog;
+use crate::agents::catalog::AgentCatalog;
 use crate::security::types::RiskLevel;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;

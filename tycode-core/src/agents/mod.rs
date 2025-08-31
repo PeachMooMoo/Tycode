@@ -3,9 +3,3 @@ pub mod catalog;
 pub mod design_agent;
 pub mod software_engineer_agent;
 pub mod tool_type;
-
-pub use agent::{ActiveAgent, Agent};
-pub use catalog::{AgentCatalog, AgentInfo};
-pub use design_agent::DesignAgent;
-pub use software_engineer_agent::SoftwareEngineerAgent;
-pub use tool_type::ToolType;

@@ -1,4 +1,6 @@
-use crate::agents::{Agent, DesignAgent, SoftwareEngineerAgent};
+use crate::agents::{
+    agent::Agent, design_agent::DesignAgent, software_engineer_agent::SoftwareEngineerAgent,
+};
 
 /// Information about an available agent
 #[derive(Clone, Debug)]

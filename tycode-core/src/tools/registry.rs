@@ -1,4 +1,4 @@
-use crate::agents::ToolType;
+use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::chat::state::FileModificationApi;
 use crate::security::types::RiskLevel;

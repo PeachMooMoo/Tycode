@@ -1,4 +1,6 @@
-use crate::agents::{ActiveAgent, AgentCatalog, ToolType};
+use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
+use crate::agents::tool_type::ToolType;
 use crate::ai::{
     error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
     ConversationResponse, Message, MessageContext, MessageRole, ModelSettings, ToolResultData,
