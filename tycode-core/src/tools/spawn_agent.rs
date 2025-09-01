@@ -60,9 +60,11 @@ impl ToolExecutor for SpawnAgent {
         let params: SpawnAgentParams = serde_json::from_value(request.arguments.clone())?;
 
         // Determine agent type, default to software_engineer
-        let agent_type = params
-            .agent_type
-            .unwrap_or_else(|| "software_engineer".to_string());
+        let Some(agent_type) = params.agent_type else {
+            return Ok(ToolResult::Error(
+                "Missing requied parameter agent_type".to_string(),
+            ));
+        };
 
         // Return PushAgent variant - actor will handle the actual push
         Ok(ToolResult::PushAgent {

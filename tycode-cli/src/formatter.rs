@@ -1,3 +1,5 @@
+use tycode_core::chat::ModelInfo;
+
 #[derive(Clone)]
 pub struct Formatter {
     use_colors: bool,
@@ -16,23 +18,18 @@ impl Formatter {
         }
     }
 
-    pub fn print_ai(&self, msg: &str) {
-        if self.use_colors {
-            println!("\x1b[32m[AI]\x1b[0m {}", msg);
-        } else {
-            println!("[AI] {}", msg);
-        }
-    }
-
-    pub fn print_ai_with_model(&self, msg: &str, model_info: &crate::chat::events::ModelInfo) {
+    pub fn print_ai(&self, msg: &str, agent: &str, model_info: &Option<ModelInfo>) {
+        let model_name = model_info
+            .as_ref()
+            .map(|m| m.model.name())
+            .unwrap_or_default();
         if self.use_colors {
             println!(
-                "\x1b[32m[AI]\x1b[0m \x1b[90m({})\x1b[0m {}",
-                model_info.model.name(),
-                msg
+                "\x1b[32m[{}]\x1b[0m \x1b[90m({})\x1b[0m {}",
+                agent, model_name, msg
             );
         } else {
-            println!("[AI] ({}) {}", model_info.model.name(), msg);
+            println!("[{}] ({}) {}", agent, model_name, msg);
         }
     }
 

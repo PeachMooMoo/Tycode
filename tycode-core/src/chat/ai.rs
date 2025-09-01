@@ -13,6 +13,7 @@ use crate::chat::{
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
 use crate::tools::context_utils::list_relevant_files;
 use crate::tools::file_access::FileAccessManager;
+use crate::tools::r#trait::ToolResult;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use std::collections::HashSet;
@@ -71,11 +72,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         // If there are tool calls, execute them and continue the loop
         if !tool_calls.is_empty() {
-            let should_continue = Box::pin(execute_tool_calls(state, tool_calls)).await?;
-
-            if should_continue {
-                continue;
-            }
+            Box::pin(execute_tool_calls(state, tool_calls)).await?;
         }
 
         // No more tool calls, exit the loop
@@ -171,7 +168,9 @@ fn process_ai_response(
         &state.state,
         ChatMessage {
             content: content.text(),
-            sender: MessageSender::Assistant,
+            sender: MessageSender::Assistant {
+                agent: current_agent(state).agent.name().to_string(),
+            },
             timestamp: Instant::now(),
             reasoning,
             tool_calls: tool_calls.clone(),
@@ -192,7 +191,7 @@ fn process_ai_response(
     tool_calls
 }
 
-async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>) -> Result<bool> {
+async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>) -> Result<()> {
     info!(
         tool_count = tool_calls.len(),
         tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
@@ -214,9 +213,7 @@ async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>
 
         handle_tool_result(state, tool_result, tool_use).await?;
     }
-
-    // Return true to continue the conversation loop
-    Ok(true)
+    Ok(())
 }
 
 async fn handle_tool_result(
@@ -225,16 +222,16 @@ async fn handle_tool_result(
     tool_use: &ToolUseData,
 ) -> Result<()> {
     match tool_result {
-        crate::tools::r#trait::ToolResult::Success {
+        ToolResult::Success {
             context_data,
             ui_data,
         } => {
             handle_tool_success(state, tool_use, context_data, ui_data);
         }
-        crate::tools::r#trait::ToolResult::Error(error) => {
+        ToolResult::Error(error) => {
             handle_tool_error(state, tool_use, error);
         }
-        crate::tools::r#trait::ToolResult::PushAgent {
+        ToolResult::PushAgent {
             agent_type,
             task,
             context,
@@ -242,7 +239,7 @@ async fn handle_tool_result(
         } => {
             handle_tool_push_agent(state, agent_type, task, context, tool_use_id).await?;
         }
-        crate::tools::r#trait::ToolResult::PopAgent {
+        ToolResult::PopAgent {
             success,
             summary,
             artifacts,

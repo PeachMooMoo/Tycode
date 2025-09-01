@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tycode_core::chat;
 
 mod base_app;
 mod event_handler;

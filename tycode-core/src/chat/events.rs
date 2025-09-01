@@ -58,7 +58,7 @@ pub struct ModelInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageSender {
     User,
-    Assistant,
+    Assistant { agent: String },
     System,
     Error,
 }
@@ -67,7 +67,7 @@ impl MessageSender {
     pub fn prefix(&self) -> &str {
         match self {
             MessageSender::User => "You",
-            MessageSender::Assistant => "AI",
+            MessageSender::Assistant { agent } => agent,
             MessageSender::System => "System",
             MessageSender::Error => "Error",
         }

@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod catalog;
-pub mod design_agent;
+pub mod coder;
+pub mod coordinator;
 pub mod software_engineer_agent;
 pub mod tool_type;

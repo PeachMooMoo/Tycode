@@ -192,7 +192,7 @@ impl SubprocessApp {
     fn format_to_json(event: ChatEvent) -> Result<()> {
         let message = match event {
             ChatEvent::MessageAdded(msg) => match msg.sender {
-                MessageSender::Assistant => {
+                MessageSender::Assistant { agent: _agent } => {
                     let tool_calls: Vec<crate::subprocess::ToolCall> = msg
                         .tool_calls
                         .iter()

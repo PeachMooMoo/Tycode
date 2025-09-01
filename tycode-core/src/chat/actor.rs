@@ -1,3 +1,9 @@
+use crate::agents::coordinator::CoordinatorAgent;
+use crate::chat::{
+    ai,
+    events::{ChatEvent, ChatMessage, MessageSender},
+    state::{ChatConfig, SharedChatState},
+};
 use crate::security::SecurityManager;
 use crate::settings::{ProviderConfig, SettingsManager};
 use crate::{
@@ -5,14 +11,6 @@ use crate::{
     ai::{
         provider::AiProvider,
         types::{Content, Message, MessageRole},
-    },
-};
-use crate::{
-    agents::software_engineer_agent::SoftwareEngineerAgent,
-    chat::{
-        ai,
-        events::{ChatEvent, ChatMessage, MessageSender},
-        state::{ChatConfig, SharedChatState},
     },
 };
 use anyhow::{bail, Result};
@@ -72,7 +70,7 @@ impl ChatActor {
             let actor_state = ActorState {
                 state: state.clone(),
                 provider,
-                agent_stack: vec![ActiveAgent::new(Box::new(SoftwareEngineerAgent))],
+                agent_stack: vec![ActiveAgent::new(Box::new(CoordinatorAgent))],
                 workspace_roots,
                 security_manager,
                 settings,

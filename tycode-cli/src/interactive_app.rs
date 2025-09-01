@@ -4,7 +4,7 @@ use crate::formatter::Formatter;
 use anyhow::Result;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 pub struct InteractiveApp {
@@ -71,12 +71,7 @@ impl InteractiveApp {
             match self.base.event_rx.recv().await {
                 Ok(event) => {
                     let is_complete = match &event {
-                        ChatEvent::MessageAdded(message) => match message.sender {
-                            MessageSender::Assistant if message.tool_calls.is_empty() => true,
-                            MessageSender::Error => true,
-                            MessageSender::System => true,
-                            _ => false,
-                        },
+                        ChatEvent::TypingStatusChanged(typing) => *typing,
                         _ => false,
                     };
 
@@ -86,10 +81,10 @@ impl InteractiveApp {
                         break;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
+                Err(RecvError::Lagged(_)) => {
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => {
+                Err(RecvError::Closed) => {
                     break;
                 }
             }
@@ -197,18 +192,14 @@ impl EventFormatter for InteractiveApp {
     fn format_event(&mut self, event: ChatEvent) -> Result<()> {
         match event {
             ChatEvent::MessageAdded(message) => match message.sender {
-                MessageSender::Assistant => {
+                MessageSender::Assistant { agent } => {
                     if let Some(ref reasoning) = message.reasoning {
                         self.formatter
                             .print_system(&format!("💭 Reasoning: {}", reasoning.text));
                     }
 
-                    if let Some(ref model_info) = message.model_info {
-                        self.formatter
-                            .print_ai_with_model(&message.content, model_info);
-                    } else {
-                        self.formatter.print_ai(&message.content);
-                    }
+                    self.formatter
+                        .print_ai(&message.content, &agent, &message.model_info);
 
                     for tool_call in &message.tool_calls {
                         self.formatter

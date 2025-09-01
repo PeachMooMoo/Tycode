@@ -1,5 +1,6 @@
 use crate::agents::{
-    agent::Agent, design_agent::DesignAgent, software_engineer_agent::SoftwareEngineerAgent,
+    agent::Agent, coder::CoderAgent, coordinator::CoordinatorAgent,
+    software_engineer_agent::SoftwareEngineerAgent,
 };
 
 /// Information about an available agent
@@ -17,12 +18,16 @@ impl AgentCatalog {
     pub fn list_agents() -> Vec<AgentInfo> {
         vec![
             AgentInfo {
-                name: "design".to_string(),
-                description: "Analyzes requirements, proposes architecture, creates design documents. Best for planning and high-level design work.".to_string(),
+                name: "coordinator".to_string(),
+                description: "Coordinates task execution, breaking requests into steps and delegating to sub‑agents".to_string(),
             },
             AgentInfo {
                 name: "software_engineer".to_string(),
-                description: "Implements code changes, refactors, writes tests. Best for hands-on coding tasks.".to_string(),
+                description: "Plans, implements, and reviews code following strict style mandates".to_string(),
+            },
+            AgentInfo {
+                name: "coder".to_string(),
+                description: "Executes assigned coding tasks, applying patches and managing files".to_string(),
             },
         ]
     }
@@ -30,7 +35,8 @@ impl AgentCatalog {
     /// Create an agent instance by name
     pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
         match name {
-            "design" => Some(Box::new(DesignAgent)),
+            "coordinator" => Some(Box::new(CoordinatorAgent)),
+            "coder" => Some(Box::new(CoderAgent)),
             "software_engineer" => Some(Box::new(SoftwareEngineerAgent)),
             _ => None,
         }
