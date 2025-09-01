@@ -71,7 +71,7 @@ impl InteractiveApp {
             match self.base.event_rx.recv().await {
                 Ok(event) => {
                     let is_complete = match &event {
-                        ChatEvent::TypingStatusChanged(typing) => *typing,
+                        ChatEvent::TypingStatusChanged(typing) => !*typing,
                         _ => false,
                     };
 
