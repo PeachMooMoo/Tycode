@@ -127,13 +127,16 @@ impl ToolRegistry {
         tool_use: &ToolUseData,
         allowed_tool_types: Option<&[ToolType]>,
     ) -> crate::tools::r#trait::ToolResult {
+        // Attempt to retrieve the requested tool. If it does not exist, include a list of available tools.
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
             None => {
+                // Build a comma‑separated list of tool names for diagnostics.
+                let available = self.list_tools().join(", ");
                 error!(tool_name = %tool_use.name, "Unknown tool");
                 return crate::tools::r#trait::ToolResult::Error(format!(
-                    "Unknown tool: {}",
-                    tool_use.name
+                    "Unknown tool: {}. Available tools: {}",
+                    tool_use.name, available
                 ));
             }
         };
@@ -173,10 +176,12 @@ impl ToolRegistry {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> Result<RiskLevel> {
+        // Retrieve the tool, or return an error that lists all known tools.
+        let available = self.list_tools().join(", ");
         let tool = self
             .tools
             .get(tool_name)
-            .ok_or_else(|| anyhow!("Unknown tool: {}", tool_name))?;
+            .ok_or_else(|| anyhow!("Unknown tool: {}. Available tools: {}", tool_name, available))?;
 
         let risk_level = tool.evaluate_risk(arguments);
         debug!(

@@ -73,6 +73,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         // If there are tool calls, execute them and continue the loop
         if !tool_calls.is_empty() {
             Box::pin(execute_tool_calls(state, tool_calls)).await?;
+            continue;
         }
 
         // No more tool calls, exit the loop

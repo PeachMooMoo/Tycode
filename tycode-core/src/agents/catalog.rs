@@ -1,5 +1,5 @@
 use crate::agents::{
-    agent::Agent, coder::CoderAgent, coordinator::CoordinatorAgent,
+    agent::Agent, code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
     software_engineer_agent::SoftwareEngineerAgent,
 };
 
@@ -29,6 +29,10 @@ impl AgentCatalog {
                 name: "coder".to_string(),
                 description: "Executes assigned coding tasks, applying patches and managing files".to_string(),
             },
+            AgentInfo {
+                name: "code_reviewer".to_string(),
+                description: "Approves or rejects proposed code changes to ensure compliance with style mandates".to_string(),
+            },
         ]
     }
 
@@ -38,6 +42,7 @@ impl AgentCatalog {
             "coordinator" => Some(Box::new(CoordinatorAgent)),
             "coder" => Some(Box::new(CoderAgent)),
             "software_engineer" => Some(Box::new(SoftwareEngineerAgent)),
+            "code_reviewer" => Some(Box::new(CodeReviewAgent)),
             _ => None,
         }
     }

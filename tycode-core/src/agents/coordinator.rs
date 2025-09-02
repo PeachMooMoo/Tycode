@@ -40,7 +40,7 @@ impl Agent for CoordinatorAgent {
 Every invocation of your AI model will include 'context' on the most recent message. The context will always include all source files in the current project and the full contents of all tracked files. You can change the set of files included in the context message using the 'set_tracked_files' tool. Once this tool is used, the context message will contain the latest contents of the new set of tracked files. 
 You do not any tools which return directory lists or file contents at a point in time; these tools pollute your context with stale versions of files. The context system is superior and is how you should read all files.
 Example: If you want to read the files `src/lib.rs` and `src/timer.rs` invoke the 'set_tracked_files' tool with [\"src/lib.rs\", \"src/timer.rs\"] included in the 'file_paths' array. 
-Remember: You can both add and remove files from the set of tracked files using the 'set_tracked_files'. Only include files required to make your current change to minimize your context window usage; once you have finished with a file remove it from the set of tracked files. Once you remove a tracked file you will forget the file contents.
+Remember: If you need multiple files in your context, include *all* required files at once. Files not included in the array are automatically untracked, and you will forget the file contents.
 
 ## Communication guidelines
 - Use a short/terse communication style. A simlpe 'acknowledged' is often suitable

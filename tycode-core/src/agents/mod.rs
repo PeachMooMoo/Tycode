@@ -4,3 +4,4 @@ pub mod coder;
 pub mod coordinator;
 pub mod software_engineer_agent;
 pub mod tool_type;
+pub mod code_review;

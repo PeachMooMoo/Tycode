@@ -29,7 +29,7 @@ Remember: You can both add and remove files from the set of tracked files using 
 • Avoid deep nesting - Use early returns rather than if/else blocks, a maximum of 4 indentation levels is permitted. Evaluate each modified line to ensure you are not nesting 4 indentation levels.
 • Separate policy from implementation - Push decisions up, execution down. Avoid passing Optional and having code having implementations decide a fallback for None/Null. Instead require the caller to supply all required parameters.
 • Focus on commenting 'why' code is written a particular way or the architectural purpose for an abstraction. 
-  • Critical: Never write single line comments explaining 'what' code does. 
+  • Critical: Never write explaining 'what' code does. 
 • Avoid over-generalizing/abstracting - Functions > Structs > Traits. 
 • Avoid global state and constants. 
 • Surface errors immediately - Never silently drop errors. Never create 'fallback' code paths.
