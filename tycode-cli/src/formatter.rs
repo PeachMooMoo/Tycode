@@ -1,3 +1,4 @@
+use tycode_core::ai::TokenUsage;
 use tycode_core::chat::ModelInfo;
 
 #[derive(Clone)]
@@ -18,18 +19,30 @@ impl Formatter {
         }
     }
 
-    pub fn print_ai(&self, msg: &str, agent: &str, model_info: &Option<ModelInfo>) {
+    pub fn print_ai(
+        &self,
+        msg: &str,
+        agent: &str,
+        model_info: &Option<ModelInfo>,
+        token_usage: &Option<TokenUsage>,
+    ) {
         let model_name = model_info
             .as_ref()
             .map(|m| m.model.name())
             .unwrap_or_default();
+
+        let usage_text = token_usage
+            .as_ref()
+            .map(|usage| format!(" (usage: {}/{})", usage.input_tokens, usage.output_tokens))
+            .unwrap_or_default();
+
         if self.use_colors {
             println!(
-                "\x1b[32m[{}]\x1b[0m \x1b[90m({})\x1b[0m {}",
-                agent, model_name, msg
+                "\x1b[32m[{}]\x1b[0m \x1b[90m({}){}\x1b[0m {}",
+                agent, model_name, usage_text, msg
             );
         } else {
-            println!("[{}] ({}) {}", agent, model_name, msg);
+            println!("[{}] ({}){} {}", agent, model_name, usage_text, msg);
         }
     }
 

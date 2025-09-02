@@ -205,6 +205,10 @@ impl BedrockProvider {
 
 #[async_trait::async_trait]
 impl AiProvider for BedrockProvider {
+    fn name(&self) -> &'static str {
+        "AWS Bedrock"
+    }
+
     fn supported_models(&self) -> Vec<Model> {
         vec![
             Model::ClaudeOpus41,
@@ -356,6 +360,17 @@ impl AiProvider for BedrockProvider {
             usage,
             stop_reason,
         })
+    }
+
+    fn get_cost(&self, model: &Model) -> Cost {
+        match model {
+            Model::ClaudeOpus41 => Cost::new(0.015, 0.075),
+            Model::ClaudeOpus4 => Cost::new(0.015, 0.075),
+            Model::ClaudeSonnet4 => Cost::new(0.003, 0.015),
+            Model::ClaudeSonnet37 => Cost::new(0.003, 0.015),
+            Model::GptOss120b => Cost::new(0.00015, 0.0006),
+            _ => Cost::new(0.0, 0.0), // Unsupported models have zero cost
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use crate::base_app::BaseApp;
 use crate::event_handler::EventFormatter;
 use crate::formatter::Formatter;
 use anyhow::Result;
+use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use tokio::sync::broadcast::error::RecvError;
@@ -35,7 +36,12 @@ impl InteractiveApp {
             let prompt = self.formatter.print_prompt();
             let line = match rl.readline(&prompt) {
                 Ok(line) => line,
-                Err(_) => break,
+                Err(err) => match err {
+                    ReadlineError::Interrupted => {
+                        continue;
+                    }
+                    _ => break,
+                },
             };
 
             let input = line.trim();
@@ -67,25 +73,32 @@ impl InteractiveApp {
     }
 
     async fn wait_for_response(&mut self) -> Result<()> {
+        use tokio::signal;
         loop {
-            match self.base.event_rx.recv().await {
-                Ok(event) => {
-                    let is_complete = match &event {
-                        ChatEvent::TypingStatusChanged(typing) => !*typing,
-                        _ => false,
-                    };
-
-                    self.format_event(event)?;
-
-                    if is_complete {
-                        break;
+            tokio::select! {
+                recv = self.base.event_rx.recv() => {
+                    match recv {
+                        Ok(event) => {
+                            let is_complete = match &event {
+                                ChatEvent::TypingStatusChanged(typing) => !*typing,
+                                _ => false,
+                            };
+                            self.format_event(event)?;
+                            if is_complete {
+                                break;
+                            }
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            continue;
+                        }
+                        Err(RecvError::Closed) => {
+                            break;
+                        }
                     }
                 }
-                Err(RecvError::Lagged(_)) => {
+                _ = signal::ctrl_c() => {
+                    self.base.cancel().await?;
                     continue;
-                }
-                Err(RecvError::Closed) => {
-                    break;
                 }
             }
         }
@@ -198,8 +211,12 @@ impl EventFormatter for InteractiveApp {
                             .print_system(&format!("💭 Reasoning: {}", reasoning.text));
                     }
 
-                    self.formatter
-                        .print_ai(&message.content, &agent, &message.model_info);
+                    self.formatter.print_ai(
+                        &message.content,
+                        &agent,
+                        &message.model_info,
+                        &message.token_usage,
+                    );
 
                     for tool_call in &message.tool_calls {
                         self.formatter
@@ -215,6 +232,19 @@ impl EventFormatter for InteractiveApp {
                 MessageSender::User => {}
             },
             ChatEvent::TypingStatusChanged(_) => {}
+            ChatEvent::Error(e) => self.formatter.print_error(&e),
+            ChatEvent::ToolExecutionCompleted {
+                tool_name: _,
+                success,
+                result,
+                ui_data: _,
+                error,
+            } => {
+                if !success {
+                    self.formatter
+                        .print_error(&format!("Tool call failed: {result:?} {error:?}"));
+                }
+            }
             _ => {}
         }
         Ok(())

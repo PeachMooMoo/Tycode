@@ -49,6 +49,10 @@ impl MockProvider {
 
 #[async_trait::async_trait]
 impl AiProvider for MockProvider {
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
     fn supported_models(&self) -> Vec<Model> {
         vec![Model::ClaudeSonnet4, Model::ClaudeSonnet37]
     }
@@ -122,6 +126,11 @@ impl AiProvider for MockProvider {
                 })
             }
         }
+    }
+
+    fn get_cost(&self, _model: &Model) -> Cost {
+        // Mock provider uses test costs
+        Cost::new(0.001, 0.002)
     }
 }
 

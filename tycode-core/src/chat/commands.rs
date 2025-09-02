@@ -1,6 +1,6 @@
 use crate::chat::{
     actor::ActorState,
-    ai,
+    ai::{self, current_agent},
     events::{ChatMessage, MessageSender},
     state::{FileModificationApi, SharedChatState},
 };
@@ -26,6 +26,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "fileapi" => handle_fileapi_command(state, &parts).await,
         "settings" => handle_settings_command(state).await,
         "security" => handle_security_command(&state.state, &parts).await,
+        "cost" => handle_cost_command(state).await,
         "help" => handle_help_command().await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
@@ -66,6 +67,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "security".to_string(),
             description: "Manage security mode and permissions".to_string(),
             usage: "/security [mode|whitelist|clear] [args...]".to_string(),
+        },
+        CommandInfo {
+            name: "cost".to_string(),
+            description: "Show session token usage and estimated cost".to_string(),
+            usage: "/cost".to_string(),
         },
         CommandInfo {
             name: "help".to_string(),
@@ -321,6 +327,34 @@ async fn handle_security_command(_state: &SharedChatState, parts: &[&str]) -> Ve
             MessageSender::System,
         )],
     }
+}
+
+async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
+    let usage = &state.session_token_usage;
+    let current_model = current_agent(state).agent.preferred_model().model;
+
+    let mut message = String::new();
+    message.push_str("=== Session Cost Summary ===\n\n");
+    message.push_str(&format!("Current Model: {:?}\n", current_model));
+    message.push_str(&format!("Provider: {}\n\n", state.provider.name()));
+
+    message.push_str("Token Usage:\n");
+    message.push_str(&format!("  Input tokens:  {:>8}\n", usage.input_tokens));
+    message.push_str(&format!("  Output tokens: {:>8}\n", usage.output_tokens));
+    message.push_str(&format!("  Total tokens:  {:>8}\n\n", usage.total_tokens));
+
+    message.push_str("Accumulated Cost:\n");
+    message.push_str(&format!("  Total cost: ${:.6}\n", state.session_cost));
+
+    if usage.total_tokens > 0 {
+        let avg_cost_per_1k = (state.session_cost / usage.total_tokens as f64) * 1000.0;
+        message.push_str(&format!(
+            "  Average per 1K tokens: ${:.6}\n",
+            avg_cost_per_1k
+        ));
+    }
+
+    vec![create_message(message, MessageSender::System)]
 }
 
 async fn handle_help_command() -> Vec<ChatMessage> {

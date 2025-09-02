@@ -161,6 +161,16 @@ fn process_ai_response(
 
     info!(?response, "AI response");
 
+    // Accumulate token usage for session tracking
+    state.session_token_usage.input_tokens += response.usage.input_tokens;
+    state.session_token_usage.output_tokens += response.usage.output_tokens;
+    state.session_token_usage.total_tokens += response.usage.total_tokens;
+
+    // Calculate and accumulate cost using the actual model used for this response
+    let cost = state.provider.get_cost(&model_settings.model);
+    let response_cost = cost.calculate_cost(&response.usage);
+    state.session_cost += response_cost;
+
     let reasoning = content.reasoning().first().map(|r| (*r).clone());
     let tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
 
@@ -209,8 +219,7 @@ async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>
 
     for tool_use in &tool_calls {
         let tool_result =
-            execute_tool_with_security(state, &tool_registry, tool_use, Some(&allowed_tool_types))
-                .await;
+            execute_tool_with_security(state, &tool_registry, tool_use, &allowed_tool_types).await;
 
         handle_tool_result(state, tool_result, tool_use).await?;
     }
@@ -513,7 +522,7 @@ async fn execute_tool_with_security(
     state: &ActorState,
     tool_registry: &ToolRegistry,
     tool_use: &ToolUseData,
-    allowed_tool_types: Option<&[ToolType]>,
+    allowed_tool_types: &[ToolType],
 ) -> crate::tools::r#trait::ToolResult {
     // First evaluate the risk level of the tool
     let risk_level = match tool_registry.evaluate_tool_risk(&tool_use.name, &tool_use.arguments) {

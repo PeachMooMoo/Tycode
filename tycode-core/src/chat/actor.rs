@@ -1,4 +1,5 @@
 use crate::agents::coordinator::CoordinatorAgent;
+use crate::agents::software_engineer_agent::SoftwareEngineerAgent;
 use crate::chat::{
     ai,
     events::{ChatEvent, ChatMessage, MessageSender},
@@ -10,7 +11,7 @@ use crate::{
     agents::agent::ActiveAgent,
     ai::{
         provider::AiProvider,
-        types::{Content, Message, MessageRole},
+        types::{Content, Message, MessageRole, TokenUsage},
     },
 };
 use anyhow::{bail, Result};
@@ -70,12 +71,14 @@ impl ChatActor {
             let actor_state = ActorState {
                 state: state.clone(),
                 provider,
-                agent_stack: vec![ActiveAgent::new(Box::new(CoordinatorAgent))],
+                agent_stack: vec![ActiveAgent::new(Box::new(SoftwareEngineerAgent))],
                 workspace_roots,
                 security_manager,
                 settings,
                 config: ChatConfig::default(),
                 tracked_files: HashSet::new(),
+                session_token_usage: TokenUsage::empty(),
+                session_cost: 0.0,
             };
 
             run_actor(actor_state, rx, cancel_rx).await;
@@ -104,6 +107,8 @@ pub struct ActorState {
     pub settings: SettingsManager,
     pub config: ChatConfig,
     pub tracked_files: HashSet<PathBuf>,
+    pub session_token_usage: TokenUsage,
+    pub session_cost: f64,
 }
 
 // Actor implementation as free functions

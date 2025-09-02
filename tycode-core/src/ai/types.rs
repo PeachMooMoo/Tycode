@@ -535,3 +535,24 @@ impl TokenUsage {
         Self::new(0, 0)
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Cost {
+    pub input_cost_per_1k_tokens: f64,
+    pub output_cost_per_1k_tokens: f64,
+}
+
+impl Cost {
+    pub fn new(input_cost_per_1k_tokens: f64, output_cost_per_1k_tokens: f64) -> Self {
+        Self {
+            input_cost_per_1k_tokens,
+            output_cost_per_1k_tokens,
+        }
+    }
+
+    pub fn calculate_cost(&self, usage: &TokenUsage) -> f64 {
+        let input_cost = (usage.input_tokens as f64 / 1000.0) * self.input_cost_per_1k_tokens;
+        let output_cost = (usage.output_tokens as f64 / 1000.0) * self.output_cost_per_1k_tokens;
+        input_cost + output_cost
+    }
+}
