@@ -116,7 +116,7 @@ impl EventFormatter for InteractiveApp {
 
                     for tool_call in &message.tool_calls {
                         self.formatter
-                            .print_tool_call(&tool_call.name, &tool_call.arguments);
+                            .print_formatted_tool_call(&tool_call.name, &tool_call.arguments);
                     }
                 }
                 MessageSender::System => {
@@ -130,16 +130,14 @@ impl EventFormatter for InteractiveApp {
             ChatEvent::TypingStatusChanged(_) => {}
             ChatEvent::Error(e) => self.formatter.print_error(&e),
             ChatEvent::ToolExecutionCompleted {
-                tool_name: _,
+                tool_name,
                 success,
                 result,
-                ui_data: _,
+                ui_data,
                 error,
             } => {
-                if !success {
-                    self.formatter
-                        .print_error(&format!("Tool call failed: {result:?} {error:?}"));
-                }
+                self.formatter
+                    .print_tool_result(&tool_name, success, result.as_ref(), ui_data.as_ref(), error.as_deref());
             }
             _ => {}
         }

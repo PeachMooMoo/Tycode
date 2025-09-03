@@ -2,10 +2,17 @@ use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
 /// Tool for replacing sections of content in files
+#[derive(Clone, Deserialize)]
+pub struct SearchReplaceBlock {
+    pub search: String,
+    pub replace: String,
+}
+
 #[derive(Clone)]
 pub struct ReplaceInFileTool {
     file_manager: FileAccessManager,
@@ -17,58 +24,23 @@ impl ReplaceInFileTool {
         Self { file_manager }
     }
 
-    /// Parse the diff format to extract replacements
-    fn parse_diff(&self, diff: &str) -> Result<Vec<(String, String)>> {
-        let mut replacements = Vec::new();
-        let blocks: Vec<&str> = diff.split("------- SEARCH").collect();
-
-        for block in blocks.iter().skip(1) {
-            // Skip the first empty block
-            let parts: Vec<&str> = block.split("=======").collect();
-            if parts.len() != 2 {
-                return Err(anyhow::anyhow!(
-                    "Invalid diff format: Each SEARCH block must have exactly one ======= separator"
-                ));
-            }
-
-            let search_part = parts[0].trim();
-            let replace_parts: Vec<&str> = parts[1].split("+++++++ REPLACE").collect();
-
-            if replace_parts.len() != 2 {
-                return Err(anyhow::anyhow!(
-                    "Invalid diff format: Missing or invalid REPLACE marker"
-                ));
-            }
-
-            let replace_part = replace_parts[0].trim();
-
-            replacements.push((search_part.to_string(), replace_part.to_string()));
-        }
-
-        if replacements.is_empty() {
-            return Err(anyhow::anyhow!("No SEARCH/REPLACE blocks found in diff"));
-        }
-
-        Ok(replacements)
-    }
-
     /// Apply replacements to content
     fn apply_replacements(
         &self,
         content: &str,
-        replacements: Vec<(String, String)>,
+        replacements: Vec<SearchReplaceBlock>,
     ) -> Result<String> {
         let mut result = content.to_string();
 
-        for (search, replace) in replacements {
-            if !result.contains(&search) {
+        for block in replacements {
+            if !result.contains(&block.search) {
                 return Err(anyhow::anyhow!(
                     "Search pattern not found in file:\n{}",
-                    search
+                    block.search
                 ));
             }
             // Replace only the first occurrence as specified
-            result = result.replacen(&search, &replace, 1);
+            result = result.replacen(&block.search, &block.replace, 1);
         }
 
         Ok(result)
@@ -94,8 +66,22 @@ impl ToolExecutor for ReplaceInFileTool {
                     "description": "Path to the file to modify. Note: File to modify must be tracked using the track_file tool before being modified. Search block in diff must exactly match the current file context from the context."
                 },
                 "diff": {
-                    "type": "string",
-                    "description": "One or more SEARCH/REPLACE blocks following this exact format:\n------- SEARCH\n[exact content to find]\n=======\n[new content to replace with]\n+++++++ REPLACE\n\nCritical: Use exactly 7 dashes before SEARCH, 7 equals for separator, 7 pluses before REPLACE. Multiple blocks can be included in one diff. Example:\n------- SEARCH\nold line 1\nold line 2\n=======\nnew line 1\nnew line 2\n+++++++ REPLACE"
+                    "type": "array",
+                    "description": "Array of search and replace blocks",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "search": {
+                                "type": "string",
+                                "description": "Exact content to find"
+                            },
+                            "replace": {
+                                "type": "string",
+                                "description": "New content to replace with"
+                            }
+                        },
+                        "required": ["search", "replace"]
+                    }
                 }
             },
             "required": ["file_path", "diff"]
@@ -117,17 +103,16 @@ impl ToolExecutor for ReplaceInFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let diff = request
+        let diff_value = request
             .arguments
             .get("diff")
-            .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff"))?;
 
         // Read the current content using FileAccessManager
         let original_content = self.file_manager.read_file(file_path).await?;
 
         // Parse and apply the diff
-        let replacements = self.parse_diff(diff)?;
+        let replacements: Vec<SearchReplaceBlock> = serde_json::from_value(diff_value.clone())?;
         let replacement_count = replacements.len();
         let new_content = self.apply_replacements(&original_content, replacements)?;
 
@@ -173,17 +158,10 @@ mod tests {
             .unwrap();
 
         // Test replacement
-        let diff = r#"------- SEARCH
-Hello World
-=======
-Hello Universe
-+++++++ REPLACE
-
-------- SEARCH
-Goodbye
-=======
-See you later
-+++++++ REPLACE"#;
+        let diff = json!([
+            {"search": "Hello World", "replace": "Hello Universe"},
+            {"search": "Goodbye", "replace": "See you later"}
+        ]);
 
         let request = ToolRequest::new(
             json!({
