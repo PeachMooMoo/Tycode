@@ -71,7 +71,6 @@ impl ToolExecutor for SpawnAgent {
             agent_type,
             task: params.task,
             context: params.context,
-            tool_use_id: request.tool_use_id.clone(),
         })
     }
 }

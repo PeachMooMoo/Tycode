@@ -53,11 +53,12 @@ Critical: User approval must be obtained before executing a plan. If you need to
 
     fn preferred_model(&self) -> ModelSettings {
         ModelSettings {
-            model: Model::GptOss120b,
+            model: Model::ClaudeSonnet4,
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,
-            reasoning_budget: None,
+            reasoning_budget: Some(8000),
+            // reasoning_budget: None,
         }
     }
 

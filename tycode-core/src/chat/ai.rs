@@ -245,16 +245,15 @@ async fn handle_tool_result(
             agent_type,
             task,
             context,
-            tool_use_id,
         } => {
-            handle_tool_push_agent(state, agent_type, task, context, tool_use_id).await?;
+            handle_tool_push_agent(state, agent_type, task, context, tool_use.id.clone()).await?;
         }
         ToolResult::PopAgent {
             success,
             summary,
             artifacts,
         } => {
-            handle_tool_pop_agent(state, success, summary, artifacts).await?;
+            handle_tool_pop_agent(state, success, summary, artifacts, tool_use.id.clone()).await?;
         }
     }
     Ok(())
@@ -366,22 +365,55 @@ async fn handle_tool_push_agent(
 
     // Store the tool_use_id in the current agent before pushing
     current_agent_mut(state).spawn_tool_use_id = Some(tool_use_id.clone());
+    info!("Pushing new agent: type={}, task={}", agent_type, task);
 
-    // Handle the agent push directly
-    if let Err(e) = handle_push_agent(state, agent_type, task, context).await {
-        error!("Failed to push agent: {:?}", e);
+    let Some(agent) = AgentCatalog::create_agent(&agent_type) else {
         // On error, add a tool result to continue the conversation
+        let error_msg = format!("Unknown agent type: {}", agent_type);
         let result = ToolResultData {
             tool_use_id,
-            content: format!("Failed to spawn agent: {:?}", e),
+            content: format!("Unknown agent: {:?}", agent_type),
             is_error: true,
         };
+
         current_agent_mut(state).conversation.push(Message {
             role: MessageRole::User,
             content: Content::from(vec![ContentBlock::ToolResult(result)]),
         });
+        add_error_message(&state.state, error_msg);
+        return Ok(());
+    };
+
+    // Create initial message for the new agent
+    let mut initial_message = task.clone();
+    if let Some(ctx) = context {
+        initial_message.push_str(&format!("\n\nContext from parent agent:\n{}", ctx));
     }
-    // Don't add tool result yet - it will be added when agent completes
+
+    // Push the new agent onto the stack
+    let mut new_agent = ActiveAgent::new(agent);
+    new_agent.conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(initial_message.clone()),
+    });
+
+    state.agent_stack.push(new_agent);
+
+    // Notify user
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: format!("🔄 Spawning {} agent for task: {}", agent_type, task),
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
+    );
+
     Ok(())
 }
 
@@ -390,17 +422,92 @@ async fn handle_tool_pop_agent(
     success: bool,
     summary: String,
     artifacts: Option<serde_json::Value>,
+    tool_use_id: String,
 ) -> Result<()> {
-    info!(
-        "Tool requesting agent pop: success={}, summary={}",
-        success, summary
+    info!("Popping agent: success={}, summary={}", success, summary);
+
+    // Don't pop if we're at the root agent
+    if state.agent_stack.len() <= 1 {
+        current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: ContentBlock::ToolResult(ToolResultData {
+                tool_use_id,
+                content: "Cannot complete task; you are the root agent".to_string(),
+                is_error: true,
+            })
+            .into(),
+        });
+
+        add_message(
+            &state.state,
+            ChatMessage {
+                content: "Cannot complete task - this is the root agent".to_string(),
+                sender: MessageSender::Error,
+                timestamp: Instant::now(),
+                reasoning: None,
+                tool_calls: Vec::new(),
+                model_info: None,
+                context_info: None,
+                token_usage: None,
+            },
+        );
+        return Ok(());
+    }
+
+    state.agent_stack.pop();
+
+    // Create result content
+    let result_content = if let Some(ref artifacts_data) = artifacts {
+        serde_json::json!({
+            "success": success,
+            "summary": summary,
+            "artifacts": artifacts_data
+        })
+    } else {
+        serde_json::json!({
+            "success": success,
+            "summary": summary
+        })
+    };
+
+    // If we have a tool_use_id, add the tool result to complete the spawn_agent call
+    let Some(tool_id) = current_agent_mut(state).spawn_tool_use_id.take() else {
+        bail!("BUG: no tool_use_id set on parent agent")
+    };
+
+    let tool_result = ToolResultData {
+        tool_use_id: tool_id,
+        content: result_content.to_string(),
+        is_error: false,
+    };
+
+    current_agent_mut(state).conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::from(vec![ContentBlock::ToolResult(tool_result)]),
+    });
+
+    // Add a user-friendly summary message
+    let result_message = if success {
+        format!("✅ Sub-agent completed successfully:\n{}", summary)
+    } else {
+        format!("❌ Sub-agent failed:\n{}", summary)
+    };
+
+    // Notify user
+    add_message(
+        &state.state,
+        ChatMessage {
+            content: result_message,
+            sender: MessageSender::System,
+            timestamp: Instant::now(),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        },
     );
 
-    // Handle the agent pop directly
-    if let Err(e) = handle_pop_agent(state, success, summary, artifacts).await {
-        error!("Failed to pop agent: {:?}", e);
-    }
-    // Tool result will be added by handle_pop_agent
     Ok(())
 }
 
@@ -599,146 +706,4 @@ fn get_mode_change_hint(risk_level: RiskLevel, current_mode: SecurityMode) -> St
         }
         _ => String::new(),
     }
-}
-
-pub async fn handle_push_agent(
-    state: &mut ActorState,
-    agent_type: String,
-    task: String,
-    context: Option<String>,
-) -> Result<()> {
-    info!("Pushing new agent: type={}, task={}", agent_type, task);
-
-    // Create the new agent
-    let Some(agent) = AgentCatalog::create_agent(&agent_type) else {
-        let error_msg = format!("Unknown agent type: {}", agent_type);
-        add_error_message(&state.state, error_msg);
-        return Ok(());
-    };
-
-    // Create initial message for the new agent
-    let mut initial_message = task.clone();
-    if let Some(ctx) = context {
-        initial_message.push_str(&format!("\n\nContext from parent agent:\n{}", ctx));
-    }
-
-    // Push the new agent onto the stack
-    let mut new_agent = ActiveAgent::new(agent);
-    new_agent.conversation.push(Message {
-        role: MessageRole::User,
-        content: Content::text_only(initial_message.clone()),
-    });
-
-    state.agent_stack.push(new_agent);
-
-    // Notify user
-    add_message(
-        &state.state,
-        ChatMessage {
-            content: format!("🔄 Spawning {} agent for task: {}", agent_type, task),
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
-
-    // Start the new agent's work
-    send_ai_request(state).await
-}
-
-pub async fn handle_pop_agent(
-    state: &mut ActorState,
-    success: bool,
-    summary: String,
-    artifacts: Option<serde_json::Value>,
-) -> Result<()> {
-    info!("Popping agent: success={}, summary={}", success, summary);
-
-    // Don't pop if we're at the root agent
-    if state.agent_stack.len() <= 1 {
-        add_message(
-            &state.state,
-            ChatMessage {
-                content: "Cannot complete task - this is the root agent".to_string(),
-                sender: MessageSender::Error,
-                timestamp: Instant::now(),
-                reasoning: None,
-                tool_calls: Vec::new(),
-                model_info: None,
-                context_info: None,
-                token_usage: None,
-            },
-        );
-        return Ok(());
-    }
-
-    // Get the spawn_tool_use_id from the current agent before popping
-    let tool_use_id = current_agent(state).spawn_tool_use_id.clone();
-
-    // Pop the current agent
-    state.agent_stack.pop();
-
-    // Create result content
-    let result_content = if success {
-        if let Some(ref artifacts_data) = artifacts {
-            serde_json::json!({
-                "success": true,
-                "summary": summary,
-                "artifacts": artifacts_data
-            })
-        } else {
-            serde_json::json!({
-                "success": true,
-                "summary": summary
-            })
-        }
-    } else {
-        serde_json::json!({
-            "success": false,
-            "summary": summary
-        })
-    };
-
-    // If we have a tool_use_id, add the tool result to complete the spawn_agent call
-    if let Some(tool_id) = tool_use_id {
-        let tool_result = ToolResultData {
-            tool_use_id: tool_id,
-            content: result_content.to_string(),
-            is_error: false,
-        };
-
-        current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::from(vec![ContentBlock::ToolResult(tool_result)]),
-        });
-    }
-
-    // Add a user-friendly summary message
-    let result_message = if success {
-        format!("✅ Sub-agent completed successfully:\n{}", summary)
-    } else {
-        format!("❌ Sub-agent failed:\n{}", summary)
-    };
-
-    // Notify user
-    add_message(
-        &state.state,
-        ChatMessage {
-            content: result_message,
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
-
-    // Continue parent agent's work
-    send_ai_request(state).await
 }

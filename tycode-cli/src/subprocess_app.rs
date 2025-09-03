@@ -4,9 +4,6 @@ use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use tracing::{error, info};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 pub struct SubprocessApp {
@@ -18,9 +15,6 @@ impl SubprocessApp {
         workspace_roots: Option<Vec<PathBuf>>,
         settings_path: Option<PathBuf>,
     ) -> Result<Self> {
-        // Setup tracing to file
-        Self::setup_tracing()?;
-
         info!("Starting SubprocessApp");
         info!("Workspace roots: {:?}", workspace_roots);
         info!("Settings path: {:?}", settings_path);
@@ -38,40 +32,6 @@ impl SubprocessApp {
         std::io::stdout().flush()?;
 
         Ok(Self { base })
-    }
-
-    fn setup_tracing() -> Result<()> {
-        use std::fs;
-        use tracing_subscriber::fmt;
-
-        // Create trace directory in user's home
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let trace_dir = PathBuf::from(home).join(".tycode").join("trace");
-        fs::create_dir_all(&trace_dir)?;
-
-        let log_file = trace_dir.join("tycode.log");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_file)?;
-
-        // Setup tracing subscriber with file output
-        tracing_subscriber::registry()
-            .with(
-                fmt::layer()
-                    .with_writer(file)
-                    .with_ansi(false)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_thread_names(true)
-                    .with_file(true)
-                    .with_line_number(true),
-            )
-            .with(EnvFilter::new("info"))
-            .init();
-
-        info!("Tracing initialized to {:?}", log_file);
-        Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {

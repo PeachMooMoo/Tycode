@@ -1,6 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 mod base_app;
 mod event_handler;
@@ -30,6 +34,8 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    setup_tracing()?;
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -75,5 +81,39 @@ async fn async_main() -> Result<()> {
         app.run().await?;
     }
 
+    Ok(())
+}
+
+fn setup_tracing() -> Result<()> {
+    use std::fs;
+    use tracing_subscriber::fmt;
+
+    // Create trace directory in user's home
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let trace_dir = PathBuf::from(home).join(".tycode").join("trace");
+    fs::create_dir_all(&trace_dir)?;
+
+    let log_file = trace_dir.join("tycode.log");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)?;
+
+    // Setup tracing subscriber with file output
+    tracing_subscriber::registry()
+        .with(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true),
+        )
+        .with(EnvFilter::new("info"))
+        .init();
+
+    info!("Tracing initialized to {:?}", log_file);
     Ok(())
 }

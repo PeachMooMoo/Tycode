@@ -1,5 +1,4 @@
 use crate::agents::coordinator::CoordinatorAgent;
-use crate::agents::software_engineer_agent::SoftwareEngineerAgent;
 use crate::chat::{
     ai,
     events::{ChatEvent, ChatMessage, MessageSender},
@@ -71,7 +70,7 @@ impl ChatActor {
             let actor_state = ActorState {
                 state: state.clone(),
                 provider,
-                agent_stack: vec![ActiveAgent::new(Box::new(SoftwareEngineerAgent))],
+                agent_stack: vec![ActiveAgent::new(Box::new(CoordinatorAgent))],
                 workspace_roots,
                 security_manager,
                 settings,
@@ -121,7 +120,6 @@ async fn run_actor(
 
     loop {
         tokio::select! {
-            // Handle incoming messages
             result = process_message(&mut rx, &mut state) => {
                 if let Err(e) = result {
                     error!(?e, "Error processing message");
@@ -254,7 +252,6 @@ async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
     Ok(())
 }
 
-// Helper functions
 fn add_message(state: &SharedChatState, message: ChatMessage) {
     state.add_message(message);
 }

@@ -37,7 +37,6 @@ pub enum ToolResult {
         agent_type: String,
         task: String,
         context: Option<String>,
-        tool_use_id: String,
     },
     /// Pop the current agent and return result to parent
     PopAgent {
