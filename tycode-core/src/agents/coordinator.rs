@@ -51,7 +51,7 @@ Remember: If you need multiple files in your context, include *all* required fil
 Critical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again."#
     }
 
-    fn preferred_model(&self) -> ModelSettings {
+    fn default_model(&self) -> ModelSettings {
         ModelSettings {
             model: Model::GrokCodeFast1,
             max_tokens: Some(32000),

@@ -113,7 +113,14 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
-    let model_settings = current.agent.preferred_model();
+    let default_model = current.agent.default_model();
+    let agent_name = current.agent.name();
+    let model_settings =
+        if let Some(override_model) = state.settings.settings().get_agent_model(agent_name) {
+            override_model.clone()
+        } else {
+            default_model
+        };
     let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {

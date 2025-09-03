@@ -6,7 +6,7 @@ use crate::{
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn system_prompt(&self) -> &str;
-    fn preferred_model(&self) -> ModelSettings;
+    fn default_model(&self) -> ModelSettings;
     fn available_tools(&self) -> Vec<ToolType>;
 }
 

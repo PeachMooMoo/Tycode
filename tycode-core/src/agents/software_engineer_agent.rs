@@ -73,7 +73,7 @@ Remember: If you need multiple files in your context, include *all* required fil
 Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop."
     }
 
-    fn preferred_model(&self) -> ModelSettings {
+    fn default_model(&self) -> ModelSettings {
         ModelSettings {
             model: Model::GrokCodeFast1,
             max_tokens: Some(32000),

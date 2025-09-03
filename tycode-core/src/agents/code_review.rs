@@ -44,7 +44,7 @@ If the change violates any mandate, reject it by invoking `complete_task` with s
 "#
     }
 
-    fn preferred_model(&self) -> ModelSettings {
+    fn default_model(&self) -> ModelSettings {
         ModelSettings {
             model: Model::GrokCodeFast1,
             max_tokens: Some(32000),

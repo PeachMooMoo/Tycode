@@ -1,3 +1,4 @@
+use crate::ai::types::ModelSettings;
 use crate::security::types::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,6 +16,10 @@ pub struct Settings {
     /// Security configuration
     #[serde(default)]
     pub security: SecurityConfig,
+
+    /// Agent-specific model overrides
+    #[serde(default)]
+    pub agent_models: HashMap<String, ModelSettings>,
 }
 
 fn default_active_provider() -> String {
@@ -84,6 +89,7 @@ impl Default for Settings {
             active_provider: "default".to_string(),
             providers,
             security: SecurityConfig::default(),
+            agent_models: HashMap::new(),
         }
     }
 }
@@ -125,6 +131,16 @@ impl Settings {
     /// List all provider names
     pub fn list_providers(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
+    }
+
+    /// Get the model settings for a specific agent
+    pub fn get_agent_model(&self, agent_name: &str) -> Option<&ModelSettings> {
+        self.agent_models.get(agent_name)
+    }
+
+    /// Set the model settings for a specific agent
+    pub fn set_agent_model(&mut self, agent_name: String, model: ModelSettings) {
+        self.agent_models.insert(agent_name, model);
     }
 }
 
