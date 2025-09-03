@@ -6,10 +6,7 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use tokio::sync::broadcast::error::RecvError;
-use tycode_core::{
-    chat::events::{ChatEvent, MessageSender},
-    settings::ProviderConfig,
-};
+use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 pub struct InteractiveApp {
     base: BaseApp,
@@ -56,16 +53,6 @@ impl InteractiveApp {
                 break;
             }
 
-            if input == "/help" {
-                self.print_help();
-                continue;
-            }
-
-            if input == "/settings" {
-                self.print_settings().await;
-                continue;
-            }
-
             rl.add_history_entry(&line)?;
             self.base.send_message(input.to_string()).await?;
             self.wait_for_response().await?;
@@ -107,103 +94,6 @@ impl InteractiveApp {
         }
 
         Ok(())
-    }
-
-    fn print_help(&self) {
-        self.formatter.print_divider();
-        self.formatter.print_system("📚 Available Commands:");
-        self.formatter.print_system("");
-
-        let commands = tycode_core::chat::commands::get_available_commands();
-        let max_name_len = commands.iter().map(|cmd| cmd.name.len()).max().unwrap_or(0);
-
-        for command in commands {
-            let padding = " ".repeat(max_name_len - command.name.len());
-            self.formatter.print_system(&format!(
-                "  /{}{} - {}",
-                command.name, padding, command.description
-            ));
-            if !command.usage.is_empty() && command.usage != format!("/{}", command.name) {
-                self.formatter.print_system(&format!(
-                    "    {}  Usage: {}",
-                    " ".repeat(max_name_len),
-                    command.usage
-                ));
-            }
-        }
-
-        self.formatter.print_system("");
-        self.formatter
-            .print_system("💬 Just type your message and press Enter to chat with the AI.");
-        self.formatter.print_divider();
-    }
-
-    async fn print_settings(&mut self) {
-        self.formatter.print_divider();
-        self.formatter.print_system("📋 Current Settings:");
-        self.formatter.print_system("");
-
-        // Get settings from the actor
-        let settings_json = match self.base.get_settings().await {
-            Ok(s) => s,
-            Err(e) => {
-                self.formatter
-                    .print_error(&format!("Failed to load settings: {}", e));
-                return;
-            }
-        };
-
-        let settings: tycode_core::settings::Settings = match serde_json::from_value(settings_json)
-        {
-            Ok(s) => s,
-            Err(e) => {
-                self.formatter
-                    .print_error(&format!("Failed to parse settings: {}", e));
-                return;
-            }
-        };
-
-        self.formatter
-            .print_system(&format!("  Active Provider: {}", settings.active_provider));
-        self.formatter.print_system("");
-
-        if !settings.providers.is_empty() {
-            self.formatter.print_system("  Configured Providers:");
-            for (name, config) in &settings.providers {
-                let is_active = name == &settings.active_provider;
-                let marker = if is_active { " (active)" } else { "" };
-
-                self.formatter
-                    .print_system(&format!("    {}{}:", name, marker));
-
-                match config {
-                    ProviderConfig::Bedrock { profile, region } => {
-                        self.formatter.print_system("      Type: AWS Bedrock");
-                        self.formatter
-                            .print_system(&format!("      Profile: {}", profile));
-                        self.formatter
-                            .print_system(&format!("      Region: {}", region));
-                    }
-                    ProviderConfig::Mock { behavior } => {
-                        self.formatter.print_system("      Type: Mock (Testing)");
-                        self.formatter
-                            .print_system(&format!("      Behavior: {:?}", behavior));
-                    }
-                    ProviderConfig::OpenRouter { .. } => {
-                        self.formatter.print_system("      Type: OpenRouter");
-                    }
-                }
-            }
-        } else {
-            self.formatter
-                .print_system("  No providers configured (using defaults)");
-        }
-
-        self.formatter.print_system("");
-        self.formatter
-            .print_system("  Use the VSCode extension to edit settings");
-
-        self.formatter.print_divider();
     }
 }
 
