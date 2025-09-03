@@ -54,7 +54,11 @@ impl AiProvider for MockProvider {
     }
 
     fn supported_models(&self) -> Vec<Model> {
-        vec![Model::ClaudeSonnet4, Model::ClaudeSonnet37]
+        vec![
+            Model::GrokCodeFast1,
+            Model::ClaudeSonnet4,
+            Model::ClaudeSonnet37,
+        ]
     }
 
     async fn converse(

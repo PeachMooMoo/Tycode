@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ai::ModelSettings;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Model {
     ClaudeOpus41,
@@ -48,6 +50,17 @@ impl Model {
             Self::GptOss120b,
             Self::GrokCodeFast1,
         ]
+    }
+
+    // Return default model settings for the model
+    pub fn default_settings(self) -> ModelSettings {
+        ModelSettings {
+            model: self,
+            max_tokens: Some(32000),
+            temperature: Some(1.0),
+            top_p: None,
+            reasoning_budget: Some(8000),
+        }
     }
 }
 

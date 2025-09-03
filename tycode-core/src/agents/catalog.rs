@@ -1,6 +1,6 @@
 use crate::agents::{
     agent::Agent, code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
-    software_engineer_agent::SoftwareEngineerAgent,
+    one_shot::OneShotAgent,
 };
 
 /// Information about an available agent
@@ -22,8 +22,8 @@ impl AgentCatalog {
                 description: "Coordinates task execution, breaking requests into steps and delegating to sub‑agents".to_string(),
             },
             AgentInfo {
-                name: "software_engineer".to_string(),
-                description: "Plans, implements, and reviews code following strict style mandates".to_string(),
+                name: "one_shot".to_string(),
+                description: "Handles complete coding tasks in a single, all-in-one workflow".to_string(),
             },
             AgentInfo {
                 name: "coder".to_string(),
@@ -40,8 +40,8 @@ impl AgentCatalog {
     pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
         match name {
             "coordinator" => Some(Box::new(CoordinatorAgent)),
+            "one_shot" => Some(Box::new(OneShotAgent)),
             "coder" => Some(Box::new(CoderAgent)),
-            "software_engineer" => Some(Box::new(SoftwareEngineerAgent)),
             "code_reviewer" => Some(Box::new(CodeReviewAgent)),
             _ => None,
         }

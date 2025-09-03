@@ -3,15 +3,15 @@ use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::types::ModelSettings;
 
-pub struct SoftwareEngineerAgent;
+pub struct OneShotAgent;
 
-impl Agent for SoftwareEngineerAgent {
+impl Agent for OneShotAgent {
     fn name(&self) -> &str {
-        "software_engineer"
+        "one_shot"
     }
 
     fn system_prompt(&self) -> &str {
-        "You are a comprehensive software engineering agent that follows a structured workflow:
+        "You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 
 1. UNDERSTAND REQUIREMENTS
    - Carefully analyze the user's request

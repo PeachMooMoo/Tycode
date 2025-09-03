@@ -175,6 +175,11 @@ impl ModelSettings {
         }
         Ok(())
     }
+
+    pub fn default_model_settings_for_name(model_name: &str) -> Option<ModelSettings> {
+        let model = Model::from_name(model_name)?;
+        Some(model.default_settings())
+    }
 }
 
 #[derive(Debug, Clone)]
