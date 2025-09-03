@@ -1,4 +1,5 @@
 use serde_json::Value;
+use similar::{ChangeTag, TextDiff};
 use tycode_core::ai::TokenUsage;
 use tycode_core::chat::ModelInfo;
 
@@ -75,7 +76,11 @@ impl Formatter {
         match name {
             "write_file" => {
                 if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
-                    let content_len = args.get("content").and_then(|v| v.as_str()).unwrap_or("").len();
+                    let content_len = args
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .len();
                     self.print_system(&format!("💾 Writing file {} ({} chars)", path, content_len));
                 } else {
                     self.print_tool_call(name, args);
@@ -84,7 +89,10 @@ impl Formatter {
             "replace_in_file" => {
                 if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
                     let diff_count = self.count_diff_blocks(args.get("diff"));
-                    self.print_system(&format!("📝 Modifying file {} ({} changes)", path, diff_count));
+                    self.print_system(&format!(
+                        "📝 Modifying file {} ({} changes)",
+                        path, diff_count
+                    ));
                     self.render_proposed_diff(args.get("diff"));
                 } else {
                     self.print_tool_call(name, args);
@@ -97,7 +105,9 @@ impl Formatter {
     }
 
     fn count_diff_blocks(&self, diff: Option<&Value>) -> usize {
-        diff.and_then(|v| v.as_array()).map(|arr| arr.len()).unwrap_or(0)
+        diff.and_then(|v| v.as_array())
+            .map(|arr| arr.len())
+            .unwrap_or(0)
     }
 
     fn render_proposed_diff(&self, diff: Option<&Value>) {
@@ -114,23 +124,65 @@ impl Formatter {
     }
 
     fn print_diff_block(&self, search: &str, replace: &str, use_colors: bool) {
-        if use_colors {
-            println!("  \x1b[91m-{}\x1b[0m", search.replace("\n", "\n  \x1b[91m-\x1b[0m"));
-            println!("  \x1b[92m+{}\x1b[0m", replace.replace("\n", "\n  \x1b[92m+\x1b[0m"));
-        } else {
-            println!("  -{}", search.replace("\n", "\n  -"));
-            println!("  +{}", replace.replace("\n", "\n  +"));
+        // Compute and print unified diff with full context using similar crate
+        let diff = TextDiff::from_lines(search, replace);
+        let mut diff = diff.unified_diff();
+        let unified = diff.context_radius(7);
+
+        for hunk in unified.iter_hunks() {
+            println!("{}", hunk.header());
+            for change in hunk.iter_changes() {
+                let line = change.value().trim_end_matches('\n');
+                match change.tag() {
+                    ChangeTag::Equal => {
+                        if use_colors {
+                            println!(" {}", line);
+                        } else {
+                            println!(" {}", line);
+                        }
+                    }
+                    ChangeTag::Delete => {
+                        if use_colors {
+                            println!("\x1b[91m-{}\x1b[0m", line);
+                        } else {
+                            println!("-{}", line);
+                        }
+                    }
+                    ChangeTag::Insert => {
+                        if use_colors {
+                            println!("\x1b[92m+{}\x1b[0m", line);
+                        } else {
+                            println!("+{}", line);
+                        }
+                    }
+                }
+            }
         }
     }
 
-    pub fn print_tool_result(&self, name: &str, success: bool, result: Option<&Value>, ui_data: Option<&Value>, error: Option<&str>) {
+    pub fn print_tool_result(
+        &self,
+        name: &str,
+        success: bool,
+        result: Option<&Value>,
+        ui_data: Option<&Value>,
+        error: Option<&str>,
+    ) {
         if success {
             self.print_system(&format!("✅ {} completed", name));
             if let Some(res) = result {
                 match name {
                     "write_file" => {
                         if let Some(bytes) = res.get("bytes_written").and_then(|v| v.as_u64()) {
-                            let action = if res.get("created").and_then(|v| v.as_bool()).unwrap_or(false) { "created" } else { "updated" };
+                            let action = if res
+                                .get("created")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                "created"
+                            } else {
+                                "updated"
+                            };
                             self.print_system(&format!("  {} file ({} bytes)", action, bytes));
                         }
                     }
@@ -139,6 +191,12 @@ impl Formatter {
                             self.print_system(&format!("  {} replacements made", reps));
                         }
                     }
+                    "search_files" => {
+                        if let Some(count) = res.get("count").and_then(|v| v.as_u64()) {
+                            self.print_system(&format!("  {} matches", count));
+                        }
+                    }
+
                     _ => {
                         if let Ok(pretty) = serde_json::to_string_pretty(res) {
                             println!("  {}", pretty.replace("\n", "\n  "));
@@ -161,7 +219,9 @@ impl Formatter {
             let error_msg = if let Some(e) = error {
                 e
             } else if let Some(r) = result {
-                r.get("message").and_then(|v| v.as_str()).unwrap_or("unknown error")
+                r.get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error")
             } else {
                 "unknown error"
             };
@@ -192,67 +252,5 @@ impl Formatter {
             }
         }
         (added, removed)
-    }
-
-    fn render_diff(&self, orig: &str, new: &str) {
-        let orig_lines: Vec<&str> = orig.split('\n').collect();
-        let new_lines: Vec<&str> = new.split('\n').collect();
-        let max_len = orig_lines.len().max(new_lines.len());
-        let mut block: Vec<(usize, &str, bool)> = Vec::new();  // (line_num, line, is_del)
-        for i in 0..max_len {
-            let orig_line = orig_lines.get(i).copied().unwrap_or("");
-            let new_line = new_lines.get(i).copied().unwrap_or("");
-            if orig_line == new_line {
-                if !block.is_empty() {
-                    self.print_diff_group(&block);
-                    block.clear();
-                }
-                println!("{:>3}: {}", i + 1, orig_line);
-            } else {
-                if !orig_line.is_empty() {
-                    block.push((i + 1, orig_line, true));
-                }
-                if !new_line.is_empty() {
-                    block.push((i + 1, new_line, false));
-                }
-            }
-        }
-        if !block.is_empty() {
-            self.print_diff_group(&block);
-        }
-    }
-
-    fn print_diff_group(&self, diff_lines: &[(usize, &str, bool)]) {
-        let mut dels = Vec::new();
-        let mut adds = Vec::new();
-        for &(num, line, is_del) in diff_lines {
-            if is_del {
-                dels.push((num, line));
-            } else {
-                adds.push((num, line));
-            }
-        }
-        for (num, line) in dels {
-            if self.use_colors {
-                println!("\x1b[91m{:>3} - {}\x1b[0m", num, line);
-            } else {
-                println!("{:>3} - {}", num, line);
-            }
-        }
-        for (num, line) in adds {
-            if self.use_colors {
-                println!("\x1b[92m{:>3} + {}\x1b[0m", num, line);
-            } else {
-println!("{:>3} + {}", num, line);
-            }
-        }
-    }
-
-    pub fn print_divider(&self) {
-        if self.use_colors {
-            println!("\x1b[36m═══════════════════════════════════════════════════\x1b[0m");
-        } else {
-            println!("═══════════════════════════════════════════════════");
-        }
     }
 }

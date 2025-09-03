@@ -138,7 +138,7 @@ fn collect_files(
     Ok(())
 }
 
-fn load_gitignore_patterns(working_dir: &Path) -> HashSet<String> {
+pub fn load_gitignore_patterns(working_dir: &Path) -> HashSet<String> {
     let mut patterns = HashSet::new();
 
     patterns.insert(".git".to_string());
@@ -147,6 +147,7 @@ fn load_gitignore_patterns(working_dir: &Path) -> HashSet<String> {
     patterns.insert("*.pyc".to_string());
     patterns.insert("__pycache__".to_string());
     patterns.insert(".DS_Store".to_string());
+    patterns.insert(".*".to_string());
 
     let gitignore_path = working_dir.join(".gitignore");
     if gitignore_path.exists() {
@@ -163,8 +164,14 @@ fn load_gitignore_patterns(working_dir: &Path) -> HashSet<String> {
     patterns
 }
 
-fn is_ignored(path: &str, patterns: &HashSet<String>) -> bool {
+pub fn is_ignored(path: &str, patterns: &HashSet<String>) -> bool {
     for pattern in patterns {
+        if pattern == ".*" {
+            let components: Vec<&str> = path.split('/').collect();
+            if components.iter().any(|c| c.starts_with('.')) {
+                return true;
+            }
+        }
         if pattern.starts_with('/') {
             let root_pattern = &pattern[1..];
             

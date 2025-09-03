@@ -2,6 +2,7 @@
 //! No abstraction needed since we're pure Rust now
 
 use crate::security::types::RiskLevel;
+use crate::tools::context_utils::{load_gitignore_patterns, is_ignored};
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use walkdir::WalkDir;
 pub struct FileAccessManager {
     workspace_roots: Vec<PathBuf>,
     max_file_size: usize,
+    max_search_output_size: usize,
 }
 
 impl FileAccessManager {
@@ -19,6 +21,7 @@ impl FileAccessManager {
         Self {
             workspace_roots,
             max_file_size: 10 * 1024 * 1024, // 10MB
+            max_search_output_size: 128 * 1024,
         }
     }
 
@@ -131,13 +134,21 @@ impl FileAccessManager {
         } else {
             None
         };
+        let ignored = load_gitignore_patterns(&self.workspace_roots[0]);
 
         let mut results = Vec::new();
         let mut truncated = false;
 
+        let mut current_size = 0;
+
         // Walk through all files in directory
         for entry in WalkDir::new(&dir_path) {
             let entry = entry?;
+            let path = entry.path();
+            let rel_path = path.strip_prefix(&dir_path).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            if is_ignored(&rel_path, &ignored) {
+                continue;
+            }
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -160,6 +171,8 @@ impl FileAccessManager {
                 context_lines,
                 max_results,
                 &mut results,
+                &mut current_size,
+                self.max_search_output_size,
             ).await?;
             
             if found_truncated {
@@ -179,6 +192,8 @@ impl FileAccessManager {
         context_lines: usize,
         max_results: usize,
         results: &mut Vec<SearchResult>,
+        current_size: &mut usize,
+        max_search_output_size: usize,
     ) -> Result<bool> {
         // Read file content
         let content = match fs::read_to_string(path).await {
@@ -192,15 +207,13 @@ impl FileAccessManager {
             vec![]
         };
 
+        let path_str_len = path.display().to_string().len();
+
         for (line_number, line) in content.lines().enumerate() {
             if !regex.is_match(line) {
                 continue;
             }
 
-            // Check if we've hit the result limit
-            if results.len() >= max_results {
-                return Ok(true);
-            }
 
             let (context_before, context_after) = if !include_context {
                 (None, None)
@@ -208,18 +221,38 @@ impl FileAccessManager {
                 let start = line_number.saturating_sub(context_lines);
                 let end = (line_number + context_lines + 1).min(lines.len());
 
-                let before = lines[start..line_number]
+                let before: Vec<String> = lines[start..line_number]
                     .iter()
                     .map(|s| s.to_string())
                     .collect();
 
-                let after = lines[(line_number + 1)..end]
+                let after: Vec<String> = lines[(line_number + 1)..end]
                     .iter()
                     .map(|s| s.to_string())
                     .collect();
 
                 (Some(before), Some(after))
             };
+
+            let result_size = path_str_len + format!("{}", line_number + 1).len() + line.len() + if let Some(ref before) = context_before {
+                before.iter().map(|s| s.len()).sum::<usize>()
+            } else {
+                0
+            } + if let Some(ref after) = context_after {
+                after.iter().map(|s| s.len()).sum::<usize>()
+            } else {
+                0
+            };
+
+            if *current_size + result_size > max_search_output_size {
+                anyhow::bail!("Search output size exceeded {} bytes", max_search_output_size);
+            }
+
+            if results.len() >= max_results {
+                return Ok(true);
+            }
+
+            *current_size += result_size;
 
             results.push(SearchResult {
                 path: path.to_path_buf(),
