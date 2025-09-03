@@ -332,6 +332,10 @@ async fn create_provider(
             let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
             Ok(Box::new(BedrockProvider::new(client)))
         }
+        ProviderConfig::OpenRouter { api_key } => {
+            use crate::ai::openrouter::OpenRouterProvider;
+            Ok(Box::new(OpenRouterProvider::new(api_key.clone())))
+        }
         ProviderConfig::Mock { behavior } => {
             use crate::ai::mock::{MockBehavior, MockProvider};
 

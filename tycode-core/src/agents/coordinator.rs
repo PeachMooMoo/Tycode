@@ -53,7 +53,7 @@ Critical: User approval must be obtained before executing a plan. If you need to
 
     fn preferred_model(&self) -> ModelSettings {
         ModelSettings {
-            model: Model::ClaudeSonnet4,
+            model: Model::GrokCodeFast1,
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,

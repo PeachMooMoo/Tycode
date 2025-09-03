@@ -35,6 +35,10 @@ pub enum ProviderConfig {
         #[serde(default)]
         behavior: MockBehaviorConfig,
     },
+    #[serde(rename = "openrouter")]
+    OpenRouter {
+        api_key: String,
+    },
     // Future providers can be added here:
     // #[serde(rename = "openai")]
     // OpenAI { api_key: String },
@@ -129,6 +133,16 @@ impl ProviderConfig {
     pub fn bedrock_profile(&self) -> Option<&str> {
         match self {
             ProviderConfig::Bedrock { profile, .. } => Some(profile.as_str()),
+            ProviderConfig::Mock { .. } => None,
+            ProviderConfig::OpenRouter { .. } => None,
+        }
+    }
+
+    /// Get the API key for OpenRouter provider
+    pub fn openrouter_api_key(&self) -> Option<&str> {
+        match self {
+            ProviderConfig::OpenRouter { api_key } => Some(api_key.as_str()),
+            ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::Mock { .. } => None,
         }
     }

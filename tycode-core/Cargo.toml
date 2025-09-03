@@ -25,6 +25,7 @@ base64 = { workspace = true }
 similar = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
+async-openai = "0.20"
 
 # Tokio with full features for native Rust
 tokio = { version = "1.36.0", features = ["full"] }

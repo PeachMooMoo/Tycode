@@ -55,11 +55,6 @@ impl BedrockProvider {
                 MessageRole::Assistant => {
                     aws_sdk_bedrockruntime::types::ConversationRole::Assistant
                 }
-                MessageRole::System => {
-                    return Err(AiError::Terminal(anyhow::anyhow!(
-                        "System messages should be in system_prompt field"
-                    )));
-                }
             };
 
             let mut content_blocks = Vec::new();

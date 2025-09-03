@@ -195,17 +195,12 @@ impl Message {
     pub fn assistant(content: impl Into<Content>) -> Self {
         Self::new(MessageRole::Assistant, content.into())
     }
-
-    pub fn system(content: impl Into<Content>) -> Self {
-        Self::new(MessageRole::System, content.into())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageRole {
     User,
     Assistant,
-    System,
 }
 
 #[derive(Debug, Clone)]

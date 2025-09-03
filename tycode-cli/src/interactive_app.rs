@@ -6,7 +6,10 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
 use tokio::sync::broadcast::error::RecvError;
-use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::{
+    chat::events::{ChatEvent, MessageSender},
+    settings::ProviderConfig,
+};
 
 pub struct InteractiveApp {
     base: BaseApp,
@@ -174,17 +177,20 @@ impl InteractiveApp {
                     .print_system(&format!("    {}{}:", name, marker));
 
                 match config {
-                    tycode_core::settings::ProviderConfig::Bedrock { profile, region } => {
+                    ProviderConfig::Bedrock { profile, region } => {
                         self.formatter.print_system("      Type: AWS Bedrock");
                         self.formatter
                             .print_system(&format!("      Profile: {}", profile));
                         self.formatter
                             .print_system(&format!("      Region: {}", region));
                     }
-                    tycode_core::settings::ProviderConfig::Mock { behavior } => {
+                    ProviderConfig::Mock { behavior } => {
                         self.formatter.print_system("      Type: Mock (Testing)");
                         self.formatter
                             .print_system(&format!("      Behavior: {:?}", behavior));
+                    }
+                    ProviderConfig::OpenRouter { .. } => {
+                        self.formatter.print_system("      Type: OpenRouter");
                     }
                 }
             }
