@@ -1,3 +1,6 @@
+use crate::agents::catalog::AgentCatalog;
+use crate::ai::model::Model;
+use crate::ai::ModelSettings;
 use crate::chat::{
     actor::ActorState,
     ai::{self, current_agent},
@@ -24,10 +27,14 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "clear" => handle_clear_command(state).await,
         "context" => handle_context_command(state).await,
         "fileapi" => handle_fileapi_command(state, &parts).await,
+        "model" => handle_model_command(state, &parts).await,
         "settings" => handle_settings_command(state).await,
         "security" => handle_security_command(&state.state, &parts).await,
+        "agentmodel" => handle_agentmodel_command(state, &parts).await,
+        "agent" => handle_agent_command(state, &parts).await,
         "cost" => handle_cost_command(state).await,
         "help" => handle_help_command().await,
+        "models" => handle_models_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
             MessageSender::System,
@@ -40,22 +47,27 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
     vec![
         CommandInfo {
             name: "clear".to_string(),
-            description: "Clear the conversation history".to_string(),
+            description: r"Clear the conversation history".to_string(),
             usage: "/clear".to_string(),
         },
         CommandInfo {
             name: "context".to_string(),
-            description: "Show what files would be included in the AI context".to_string(),
+            description: r"Show what files would be included in the AI context".to_string(),
             usage: "/context".to_string(),
         },
         CommandInfo {
             name: "fileapi".to_string(),
-            description: "Set the file modification API (patch or find-replace)".to_string(),
+            description: r"Set the file modification API (patch or find-replace)".to_string(),
             usage: "/fileapi <patch|findreplace>".to_string(),
         },
         CommandInfo {
+            name: r"model".to_string(),
+            description: r"Set the AI model for all agents".to_string(),
+            usage: r"/model <name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]".to_string(),
+        },
+        CommandInfo {
             name: "trace".to_string(),
-            description: "Enable/disable trace logging to .tycode/trace".to_string(),
+            description: r"Enable/disable trace logging to .tycode/trace".to_string(),
             usage: "/trace <on|off>".to_string(),
         },
         CommandInfo {
@@ -77,6 +89,21 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "help".to_string(),
             description: "Show this help message".to_string(),
             usage: "/help".to_string(),
+        },
+        CommandInfo {
+            name: "models".to_string(),
+            description: "List available AI models".to_string(),
+            usage: "/models".to_string(),
+        },
+        CommandInfo {
+            name: "agentmodel".to_string(),
+            description: "Set the AI model for a specific agent with tunings".to_string(),
+            usage: "/agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]".to_string(),
+        },
+        CommandInfo {
+            name: "agent".to_string(),
+            description: "Switch the current agent".to_string(),
+            usage: "/agent <name>".to_string(),
         },
         CommandInfo {
             name: "quit".to_string(),
@@ -109,13 +136,13 @@ async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     let file_manager = FileAccessManager::new(vec![working_dir.clone()]);
 
     let mut message = String::new();
-    message.push_str("=== AI Context Debug Info ===\n\n");
+    message.push_str(r"=== AI Context Debug Info ===\n\n");
 
     // Show directory listing info
-    message.push_str("DIRECTORY LISTING (file paths only):\n");
-    message.push_str(&format!("  Total files: {}\n", relevant.files.len()));
+    message.push_str(r"DIRECTORY LISTING (file paths only):\n");
+    message.push_str(&format!(r"  Total files: {}\n", relevant.files.len()));
     if relevant.truncated {
-        message.push_str("  ⚠️ WARNING: Directory listing was TRUNCATED (too many files)\n");
+        message.push_str(r"  ⚠️ WARNING: Directory listing was TRUNCATED (too many files)\n");
     }
 
     // Group files by directory for better readability
@@ -331,7 +358,7 @@ async fn handle_security_command(_state: &SharedChatState, parts: &[&str]) -> Ve
 
 async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     let usage = &state.session_token_usage;
-    let current_model = current_agent(state).agent.preferred_model().model;
+    let current_model = current_agent(state).agent.default_model().model;
 
     let mut message = String::new();
     message.push_str("=== Session Cost Summary ===\n\n");
@@ -368,6 +395,197 @@ async fn handle_help_command() -> Vec<ChatMessage> {
     vec![create_message(message, MessageSender::System)]
 }
 
+async fn handle_models_command(state: &ActorState) -> Vec<ChatMessage> {
+    let models = state.provider.supported_models();
+    let model_names: Vec<String> = if models.is_empty() {
+        vec!["GrokCodeFast1".to_string()]
+    } else {
+        models.iter().map(|m| m.name().to_string()).collect()
+    };
+    let response = model_names.join(", ");
+    vec![create_message(response, MessageSender::System)]
+}
+
+async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            "Usage: /model <name> [key=value...]\nValid keys: temperature, max_tokens, top_p, reasoning_budget\nUse /models to list available models.".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let model_name = parts[1];
+    let model = match Model::from_name(model_name) {
+        Some(m) => m,
+        None => {
+            return vec![create_message(
+                format!(
+                    "Unknown model: {}. Use /models to list available models.",
+                    model_name
+                ),
+                MessageSender::System,
+            )];
+        }
+    };
+
+    let settings = match parse_model_settings_overrides(&model, &parts[2..]) {
+        Ok(s) => s,
+        Err(e) => return vec![create_message(e, MessageSender::System)],
+    };
+
+    // Set for all agents
+    let agent_names: Vec<String> = AgentCatalog::get_agent_names();
+    for agent_name in agent_names {
+        state
+            .settings
+            .settings_mut()
+            .set_agent_model(agent_name, settings.clone());
+    }
+
+    // Save
+    if let Err(e) = state.settings.save() {
+        return vec![create_message(
+            format!("Failed to save settings: {}", e),
+            MessageSender::System,
+        )];
+    }
+
+    // Success message
+    let mut overrides = Vec::new();
+    if settings.temperature.is_some() {
+        overrides.push(format!("temperature={}", settings.temperature.unwrap()));
+    }
+    if settings.max_tokens.is_some() {
+        overrides.push(format!("max_tokens={}", settings.max_tokens.unwrap()));
+    }
+    if settings.top_p.is_some() {
+        overrides.push(format!("top_p={}", settings.top_p.unwrap()));
+    }
+    if settings.reasoning_budget.is_some() {
+        overrides.push(format!(
+            "reasoning_budget={}",
+            settings.reasoning_budget.unwrap()
+        ));
+    }
+
+    let overrides_str = if overrides.is_empty() {
+        "".to_string()
+    } else {
+        format!(" (with {})", overrides.join(", "))
+    };
+
+    vec![create_message(
+        format!(
+            "Model successfully set to {} for all agents{}.",
+            model.name(),
+            overrides_str
+        ),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(format!("Usage: /agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]\nValid agents: {}", AgentCatalog::get_agent_names().join(", ")), MessageSender::System)];
+    }
+    let agent_name = parts[1];
+    if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
+        return vec![create_message(format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")), MessageSender::System)];
+    }
+    let model_name = parts[2];
+    let model = match Model::from_name(model_name) {
+        Some(m) => m,
+        None => {
+            return vec![create_message(
+                format!(
+                    "Unknown model: {}. Use /models to list available models.",
+                    model_name
+                ),
+                MessageSender::System,
+            )]
+        }
+    };
+    let settings = match parse_model_settings_overrides(&model, &parts[3..]) {
+        Ok(s) => s,
+        Err(e) => return vec![create_message(e, MessageSender::System)],
+    };
+    state
+        .settings
+        .settings_mut()
+        .set_agent_model(agent_name.to_string(), settings.clone());
+    if let Err(e) = state.settings.save() {
+        return vec![create_message(
+            format!("Failed to save settings: {}", e),
+            MessageSender::System,
+        )];
+    }
+    // Collect overrides for message
+    let mut overrides = Vec::new();
+    if let Some(v) = settings.temperature {
+        overrides.push(format!("temperature={}", v));
+    }
+    if let Some(v) = settings.max_tokens {
+        overrides.push(format!("max_tokens={}", v));
+    }
+    if let Some(v) = settings.top_p {
+        overrides.push(format!("top_p={}", v));
+    }
+    if let Some(v) = settings.reasoning_budget {
+        overrides.push(format!("reasoning_budget={}", v));
+    }
+    let overrides_str = if overrides.is_empty() {
+        "".to_string()
+    } else {
+        format!(" (with {})", overrides.join(", "))
+    };
+    vec![create_message(
+        format!(
+            "Model successfully set to {} for agent {}{}.",
+            model.name(),
+            agent_name,
+            overrides_str
+        ),
+        MessageSender::System,
+    )]
+}
+
+fn parse_model_settings_overrides(
+    model: &Model,
+    overrides: &[&str],
+) -> Result<ModelSettings, String> {
+    let mut settings = model.default_settings();
+    for &arg in overrides {
+        let eq_pos = arg
+            .find('=')
+            .ok_or(format!("Invalid argument: {}. Expected key=value", arg))?;
+        let key = &arg[..eq_pos];
+        let value_str = &arg[eq_pos + 1..];
+        match key {
+            "temperature" => {
+                let v: f32 = value_str.parse().map_err(|_| format!("Invalid temperature value: {}. Expected a float (e.g., 0.7).", value_str))?;
+                settings.temperature = Some(v);
+            }
+            "max_tokens" => {
+                let v: u32 = value_str.parse().map_err(|_| format!("Invalid max_tokens value: {}. Expected a positive integer (e.g., 4096).", value_str))?;
+                settings.max_tokens = Some(v);
+            }
+            "top_p" => {
+                let v: f32 = value_str.parse().map_err(|_| format!("Invalid top_p value: {}. Expected a float (e.g., 1.0).", value_str))?;
+                settings.top_p = Some(v);
+            }
+            "reasoning_budget" => {
+                let v: u32 = value_str.parse().map_err(|_| format!("Invalid reasoning_budget value: {}. Expected a positive integer (e.g., 1024).", value_str))?;
+                settings.reasoning_budget = Some(v);
+            }
+            _ => return Err(format!("Unknown parameter: {}. Valid parameters: temperature, max_tokens, top_p, reasoning_budget", key)),
+        }
+    }
+    settings
+        .validate()
+        .map_err(|e| format!("Invalid settings: {}", e))?;
+    Ok(settings)
+}
+
 fn create_message(content: String, sender: MessageSender) -> ChatMessage {
     ChatMessage {
         content,
@@ -379,4 +597,53 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
         context_info: None,
         token_usage: None,
     }
+}
+
+async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            format!("Usage: /agent <name>. Valid agents: {}", AgentCatalog::get_agent_names().join(", ")),
+            MessageSender::System,
+        )];
+    }
+
+    let agent_name = parts[1];
+
+    if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
+        return vec![create_message(
+            format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")),
+            MessageSender::System,
+        )];
+    }
+
+    // Check for sub-agents: block switch if sub-agents are active
+    if state.agent_stack.len() > 1 {
+        return vec![create_message(
+            "Cannot switch agent while sub-agents are active.".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    // Check if already on the agent to avoid unnecessary switching
+    if ai::current_agent(state).agent.name() == agent_name {
+        return vec![create_message(
+            format!("Already switched to agent: {}", agent_name),
+            MessageSender::System,
+        )];
+    }
+
+    // Preserve conversation from current agent before switching
+    let old_conversation = ai::current_agent(state).conversation.clone();
+
+    // Create new root agent and replace the current one
+    let new_agent_dyn = AgentCatalog::create_agent(agent_name).unwrap();
+    let mut new_root_agent = crate::agents::agent::ActiveAgent::new(new_agent_dyn);
+    new_root_agent.conversation = old_conversation;
+    new_root_agent.spawn_tool_use_id = None;
+    state.agent_stack[0] = new_root_agent;
+
+    vec![create_message(
+        format!("Switched to agent: {}", agent_name),
+        MessageSender::System,
+    )]
 }
