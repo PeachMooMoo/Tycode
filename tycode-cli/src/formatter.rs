@@ -197,6 +197,9 @@ impl Formatter {
                         }
                     }
 
+                    "run_build_test" => {
+                        self.print_run_build_test_result(res);
+                    }
                     _ => {
                         if let Ok(pretty) = serde_json::to_string_pretty(res) {
                             println!("  {}", pretty.replace("\n", "\n  "));
@@ -252,5 +255,45 @@ impl Formatter {
             }
         }
         (added, removed)
+    }
+
+    fn print_run_build_test_result(&self, res: &serde_json::Value) {
+        let command = res.get("command").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        let working_directory = res.get("working_directory").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        if self.use_colors {
+            println!("  \x1b[32mCommand:\x1b[0m {}", command);
+            println!("  \x1b[32mWorking Directory:\x1b[0m {}", working_directory);
+            println!("  \x1b[32mStatus:\x1b[0m \x1b[32mSuccess\x1b[0m");
+        } else {
+            println!("  Command: {}", command);
+            println!("  Working Directory: {}", working_directory);
+            println!("  Status: Success");
+        }
+        if res.get("timed_out").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            if self.use_colors {
+                println!("  \x1b[32mTimed Out:\x1b[0m \x1b[32mYes\x1b[0m");
+            } else {
+                println!("  Timed Out: Yes");
+            }
+        } else {
+            let exit_code = res.get("exit_code").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            if self.use_colors {
+                println!("  \x1b[32mExit Code:\x1b[0m \x1b[32m{}\x1b[0m", exit_code);
+            } else {
+                println!("  Exit Code: {}", exit_code);
+            }
+        }
+        println!("  Stdout:");
+        if let Some(stdout) = res.get("stdout").and_then(serde_json::Value::as_str) {
+            for line in stdout.lines() {
+                println!("    {}", line);
+            }
+        }
+        println!("  Stderr:");
+        if let Some(stderr) = res.get("stderr").and_then(serde_json::Value::as_str) {
+            for line in stderr.lines() {
+                println!("    {}", line);
+            }
+        }
     }
 }

@@ -1,8 +1,8 @@
-use std::time::Instant;
-
 use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChatEvent {
     MessageAdded(ChatMessage),
     TypingStatusChanged(bool),
@@ -26,11 +26,11 @@ pub enum ChatEvent {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub content: String,
+    pub timestamp: u64,
     pub sender: MessageSender,
-    pub timestamp: Instant,
+    pub content: String,
     pub reasoning: Option<ReasoningData>,
     pub tool_calls: Vec<ToolUseData>,
     pub model_info: Option<ModelInfo>,
@@ -38,24 +38,86 @@ pub struct ChatMessage {
     pub token_usage: Option<TokenUsage>,
 }
 
-#[derive(Debug, Clone)]
+impl ChatMessage {
+    pub fn user(content: String) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::User,
+            content,
+            reasoning: None,
+            tool_calls: vec![],
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        }
+    }
+
+    pub fn assistant(
+        agent: String,
+        content: String,
+        tool_calls: Vec<ToolUseData>,
+        model_info: ModelInfo,
+        token_usage: TokenUsage,
+        context_info: ContextInfo,
+        reasoning: Option<ReasoningData>,
+    ) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::Assistant { agent },
+            content,
+            reasoning,
+            tool_calls,
+            model_info: Some(model_info),
+            context_info: Some(context_info),
+            token_usage: Some(token_usage),
+        }
+    }
+
+    pub fn system(content: String) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::System,
+            content,
+            reasoning: None,
+            tool_calls: vec![],
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        }
+    }
+
+    pub fn error(content: String) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::Error,
+            content,
+            reasoning: None,
+            tool_calls: vec![],
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextInfo {
     pub directory_list_bytes: usize,
     pub files: Vec<FileInfo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub path: String,
     pub bytes: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub model: Model,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MessageSender {
     User,
     Assistant { agent: String },

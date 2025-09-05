@@ -7,7 +7,7 @@ use crate::chat::{
     events::{ChatMessage, MessageSender},
     state::{FileModificationApi, SharedChatState},
 };
-use std::time::Instant;
+use chrono::Utc;
 
 #[derive(Clone, Debug)]
 pub struct CommandInfo {
@@ -37,7 +37,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "models" => handle_models_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
-            MessageSender::System,
+            MessageSender::Error
         )],
     }
 }
@@ -253,19 +253,19 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                 state.config.file_modification_api = FileModificationApi::Patch;
                 vec![create_message(
                     "File modification API set to: patch".to_string(),
-                    MessageSender::System,
+            MessageSender::Error
                 )]
             }
             "findreplace" | "find-replace" => {
                 state.config.file_modification_api = FileModificationApi::FindReplace;
                 vec![create_message(
                     "File modification API set to: find-replace".to_string(),
-                    MessageSender::System,
+            MessageSender::Error
                 )]
             }
             _ => vec![create_message(
                 "Unknown file API. Use: patch, findreplace".to_string(),
-                MessageSender::System,
+            MessageSender::Error,
             )],
         }
     } else {
@@ -333,7 +333,7 @@ async fn handle_security_command(_state: &SharedChatState, parts: &[&str]) -> Ve
                          Requested mode: {}",
                         mode_str
                     ),
-                    MessageSender::System,
+                    MessageSender::Error
                 )]
             } else {
                 vec![create_message(
@@ -398,7 +398,7 @@ async fn handle_help_command() -> Vec<ChatMessage> {
 async fn handle_models_command(state: &ActorState) -> Vec<ChatMessage> {
     let models = state.provider.supported_models();
     let model_names: Vec<String> = if models.is_empty() {
-        vec!["GrokCodeFast1".to_string()]
+        vec![Model::GrokCodeFast1.name().to_string()]
     } else {
         models.iter().map(|m| m.name().to_string()).collect()
     };
@@ -423,14 +423,14 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
                     "Unknown model: {}. Use /models to list available models.",
                     model_name
                 ),
-                MessageSender::System,
+                MessageSender::Error,
             )];
         }
     };
 
     let settings = match parse_model_settings_overrides(&model, &parts[2..]) {
         Ok(s) => s,
-        Err(e) => return vec![create_message(e, MessageSender::System)],
+        Err(e) => return vec![create_message(e, MessageSender::Error)],
     };
 
     // Set for all agents
@@ -490,7 +490,7 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
     }
     let agent_name = parts[1];
     if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
-        return vec![create_message(format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")), MessageSender::System)];
+        return vec![create_message(format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")), MessageSender::Error)];
     }
     let model_name = parts[2];
     let model = match Model::from_name(model_name) {
@@ -501,13 +501,13 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
                     "Unknown model: {}. Use /models to list available models.",
                     model_name
                 ),
-                MessageSender::System,
+                MessageSender::Error,
             )]
         }
     };
     let settings = match parse_model_settings_overrides(&model, &parts[3..]) {
         Ok(s) => s,
-        Err(e) => return vec![create_message(e, MessageSender::System)],
+        Err(e) => return vec![create_message(e, MessageSender::Error)],
     };
     state
         .settings
@@ -590,7 +590,7 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
     ChatMessage {
         content,
         sender,
-        timestamp: Instant::now(),
+        timestamp: Utc::now().timestamp_millis() as u64,
         reasoning: None,
         tool_calls: Vec::new(),
         model_info: None,

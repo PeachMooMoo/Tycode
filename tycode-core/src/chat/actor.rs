@@ -1,7 +1,7 @@
 use crate::agents::coordinator::CoordinatorAgent;
 use crate::chat::{
     ai,
-    events::{ChatEvent, ChatMessage, MessageSender},
+    events::{ChatEvent, ChatMessage},
     state::{ChatConfig, SharedChatState},
 };
 use crate::security::SecurityManager;
@@ -17,7 +17,7 @@ use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -180,16 +180,7 @@ fn handle_cancelled(state: &mut ActorState) {
 
     add_message(
         &state.state,
-        ChatMessage {
-            content: "Operation cancelled.".to_string(),
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
+        ChatMessage::system("Operation cancelled.".to_string()),
     );
 }
 
@@ -209,20 +200,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 
     state.state.add_to_history(input.clone());
 
-    add_message(
-        &state.state,
-        ChatMessage {
-            content: input.clone(),
-            sender: MessageSender::User,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
-
+    add_message(&state.state, ChatMessage::user(input.clone()));
     ai::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
         content: Content::text_only(input),
@@ -237,16 +215,7 @@ async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
 
     add_message(
         &state.state,
-        ChatMessage {
-            content: "Settings reloaded successfully.".to_string(),
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
+        ChatMessage::system("Settings reloaded successfully.".to_string()),
     );
 
     Ok(())
@@ -257,19 +226,7 @@ fn add_message(state: &SharedChatState, message: ChatMessage) {
 }
 
 fn add_error_message(state: &SharedChatState, error: String) {
-    add_message(
-        state,
-        ChatMessage {
-            content: error,
-            sender: MessageSender::Error,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
+    add_message(state, ChatMessage::error(error));
 }
 
 async fn handle_provider_change(state: &mut ActorState, provider_name: String) -> Result<()> {
@@ -278,16 +235,7 @@ async fn handle_provider_change(state: &mut ActorState, provider_name: String) -
 
     add_message(
         &state.state,
-        ChatMessage {
-            content: format!("Switched to provider: {}", provider_name),
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
+        ChatMessage::system(format!("Switched to provider: {}", provider_name)),
     );
 
     Ok(())

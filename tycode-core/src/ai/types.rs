@@ -208,7 +208,7 @@ pub enum MessageRole {
     Assistant,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningData {
     pub text: String,
     pub signature: Option<String>,
@@ -221,14 +221,14 @@ impl std::fmt::Display for ReasoningData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolUseData {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResultData {
     pub tool_use_id: String,
     pub content: String,
@@ -493,7 +493,7 @@ pub struct ConversationResponse {
     pub stop_reason: StopReason,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,

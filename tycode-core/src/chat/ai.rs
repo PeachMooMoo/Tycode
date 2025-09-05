@@ -7,7 +7,7 @@ use crate::ai::{
     ToolUseData,
 };
 use crate::chat::{
-    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, MessageSender, ModelInfo},
+    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, ModelInfo},
     state::SharedChatState,
 };
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
@@ -18,7 +18,7 @@ use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
@@ -38,19 +38,7 @@ fn add_message(state: &SharedChatState, message: ChatMessage) {
 }
 
 fn add_error_message(state: &SharedChatState, error: String) {
-    add_message(
-        state,
-        ChatMessage {
-            content: error,
-            sender: MessageSender::Error,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
+    add_message(state, ChatMessage::error(error));
 }
 
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
@@ -85,7 +73,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
 async fn prepare_ai_request(
     state: &mut ActorState,
-) -> Result<(ConversationRequest, Option<ContextInfo>, ModelSettings)> {
+) -> Result<(ConversationRequest, ContextInfo, ModelSettings)> {
     let current = current_agent(state);
 
     // Prepare tools
@@ -136,7 +124,7 @@ async fn prepare_ai_request(
     Ok((request, context_info, model_settings))
 }
 
-fn create_context_info(message_context: &MessageContext) -> Option<ContextInfo> {
+fn create_context_info(message_context: &MessageContext) -> ContextInfo {
     let dir_list_size = message_context
         .relevant_files
         .iter()
@@ -152,17 +140,17 @@ fn create_context_info(message_context: &MessageContext) -> Option<ContextInfo> 
         })
         .collect();
 
-    Some(ContextInfo {
+    ContextInfo {
         directory_list_bytes: dir_list_size,
         files,
-    })
+    }
 }
 
 fn process_ai_response(
     state: &mut ActorState,
     response: ConversationResponse,
     model_settings: ModelSettings,
-    context_info: Option<ContextInfo>,
+    context_info: ContextInfo,
 ) -> Vec<ToolUseData> {
     let content = response.content.clone();
 
@@ -184,20 +172,17 @@ fn process_ai_response(
     // Add assistant message to UI
     add_message(
         &state.state,
-        ChatMessage {
-            content: content.text(),
-            sender: MessageSender::Assistant {
-                agent: current_agent(state).agent.name().to_string(),
-            },
-            timestamp: Instant::now(),
-            reasoning,
-            tool_calls: tool_calls.clone(),
-            model_info: Some(ModelInfo {
+        ChatMessage::assistant(
+            current_agent(state).agent.name().to_string(),
+            content.text(),
+            tool_calls.clone(),
+            ModelInfo {
                 model: model_settings.model,
-            }),
+            },
+            response.usage,
             context_info,
-            token_usage: Some(response.usage),
-        },
+            reasoning,
+        ),
     );
 
     // Add to conversation history
@@ -409,16 +394,10 @@ async fn handle_tool_push_agent(
     // Notify user
     add_message(
         &state.state,
-        ChatMessage {
-            content: format!("🔄 Spawning {} agent for task: {}", agent_type, task),
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
+        ChatMessage::system(format!(
+            "🔄 Spawning {} agent for task: {}",
+            agent_type, task
+        )),
     );
 
     Ok(())
@@ -447,16 +426,7 @@ async fn handle_tool_pop_agent(
 
         add_message(
             &state.state,
-            ChatMessage {
-                content: "Cannot complete task - this is the root agent".to_string(),
-                sender: MessageSender::Error,
-                timestamp: Instant::now(),
-                reasoning: None,
-                tool_calls: Vec::new(),
-                model_info: None,
-                context_info: None,
-                token_usage: None,
-            },
+            ChatMessage::error("Cannot complete task - this is the root agent".to_string()),
         );
         return Ok(());
     }
@@ -501,19 +471,7 @@ async fn handle_tool_pop_agent(
     };
 
     // Notify user
-    add_message(
-        &state.state,
-        ChatMessage {
-            content: result_message,
-            sender: MessageSender::System,
-            timestamp: Instant::now(),
-            reasoning: None,
-            tool_calls: Vec::new(),
-            model_info: None,
-            context_info: None,
-            token_usage: None,
-        },
-    );
+    add_message(&state.state, ChatMessage::system(result_message));
 
     Ok(())
 }
