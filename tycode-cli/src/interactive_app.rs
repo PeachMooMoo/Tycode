@@ -5,7 +5,6 @@ use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
-use tokio::sync::broadcast::error::RecvError;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 pub struct InteractiveApp {
@@ -54,7 +53,7 @@ impl InteractiveApp {
             }
 
             rl.add_history_entry(&line)?;
-            self.base.send_message(input.to_string()).await?;
+            self.base.send_message(input.to_string())?;
             self.wait_for_response().await?;
         }
 
@@ -68,7 +67,7 @@ impl InteractiveApp {
             tokio::select! {
                 recv = self.base.event_rx.recv() => {
                     match recv {
-                        Ok(event) => {
+                        Some(event) => {
                             let is_complete = match &event {
                                 ChatEvent::TypingStatusChanged(typing) => !*typing,
                                 _ => false,
@@ -78,16 +77,13 @@ impl InteractiveApp {
                                 break;
                             }
                         }
-                        Err(RecvError::Lagged(_)) => {
-                            continue;
-                        }
-                        Err(RecvError::Closed) => {
+                        None => {
                             break;
                         }
                     }
                 }
                 _ = signal::ctrl_c() => {
-                    self.base.cancel().await?;
+                    self.base.cancel()?;
                     continue;
                 }
             }
@@ -136,8 +132,13 @@ impl EventFormatter for InteractiveApp {
                 ui_data,
                 error,
             } => {
-                self.formatter
-                    .print_tool_result(&tool_name, success, result.as_ref(), ui_data.as_ref(), error.as_deref());
+                self.formatter.print_tool_result(
+                    &tool_name,
+                    success,
+                    result.as_ref(),
+                    ui_data.as_ref(),
+                    error.as_deref(),
+                );
             }
             _ => {}
         }

@@ -1,10 +1,19 @@
 use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
+/// `ChatEvent` are the messages sent from the actor - the output of the actor.
+///
+/// The actor is built with 2 channels - an input and output channel. Requests
+/// are sent to the actor through the input channel. Requests may generate 1 or
+/// move `ChatEvent`s in response which are sent to the output channel. Various
+/// applications (CLI/VSCode/Tests) process chat events to implement their
+/// application sepecific logic/rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChatEvent {
     MessageAdded(ChatMessage),
+    Settings(serde_json::Value),
     TypingStatusChanged(bool),
     ConversationCleared,
     ToolExecutionCompleted {
@@ -133,5 +142,30 @@ impl MessageSender {
             MessageSender::System => "System",
             MessageSender::Error => "Error",
         }
+    }
+}
+
+/// A small wrapper over the `event_tx` for convienance.
+#[derive(Clone)]
+pub struct EventSender {
+    pub event_tx: mpsc::UnboundedSender<ChatEvent>,
+}
+
+impl EventSender {
+    pub fn new() -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
+        let (event_tx, rx) = mpsc::unbounded_channel();
+        (Self { event_tx }, rx)
+    }
+
+    pub fn add_message(&self, message: ChatMessage) {
+        let _ = self.event_tx.send(ChatEvent::MessageAdded(message));
+    }
+
+    pub fn set_typing(&self, typing: bool) {
+        let _ = self.event_tx.send(ChatEvent::TypingStatusChanged(typing));
+    }
+
+    pub fn clear_conversation(&self) {
+        let _ = self.event_tx.send(ChatEvent::ConversationCleared);
     }
 }

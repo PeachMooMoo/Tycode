@@ -6,10 +6,7 @@ use crate::ai::{
     ConversationResponse, Message, MessageContext, MessageRole, ModelSettings, ToolResultData,
     ToolUseData,
 };
-use crate::chat::{
-    events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, ModelInfo},
-    state::SharedChatState,
-};
+use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, ModelInfo};
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
 use crate::tools::context_utils::list_relevant_files;
 use crate::tools::file_access::FileAccessManager;
@@ -33,14 +30,6 @@ pub fn current_agent_mut(state: &mut ActorState) -> &mut ActiveAgent {
     state.agent_stack.last_mut().expect("No active agent")
 }
 
-fn add_message(state: &SharedChatState, message: ChatMessage) {
-    state.add_message(message);
-}
-
-fn add_error_message(state: &SharedChatState, error: String) {
-    add_message(state, ChatMessage::error(error));
-}
-
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
         // Prepare the AI request with all necessary context
@@ -50,7 +39,9 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         let response = match send_request_with_retry(state, request).await {
             Ok(response) => response,
             Err(e) => {
-                add_error_message(&state.state, format!("Error: {:?}", e));
+                state
+                    .event_sender
+                    .add_message(ChatMessage::error(format!("Error: {:?}", e)));
                 return Ok(());
             }
         };
@@ -170,20 +161,17 @@ fn process_ai_response(
     let tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
 
     // Add assistant message to UI
-    add_message(
-        &state.state,
-        ChatMessage::assistant(
-            current_agent(state).agent.name().to_string(),
-            content.text(),
-            tool_calls.clone(),
-            ModelInfo {
-                model: model_settings.model,
-            },
-            response.usage,
-            context_info,
-            reasoning,
-        ),
-    );
+    state.event_sender.add_message(ChatMessage::assistant(
+        current_agent(state).agent.name().to_string(),
+        content.text(),
+        tool_calls.clone(),
+        ModelInfo {
+            model: model_settings.model,
+        },
+        response.usage,
+        context_info,
+        reasoning,
+    ));
 
     // Add to conversation history
     current_agent_mut(state).conversation.push(Message {
@@ -300,7 +288,7 @@ fn handle_tool_success(
         error: None,
     };
 
-    if let Err(e) = state.state.event_tx.send(event) {
+    if let Err(e) = state.event_sender.event_tx.send(event) {
         error!("Failed to send tool completion event: {:?}", e);
     }
 
@@ -332,7 +320,7 @@ fn handle_tool_error(state: &mut ActorState, tool_use: &ToolUseData, error: Stri
         error: Some(error),
     };
 
-    if let Err(e) = state.state.event_tx.send(event) {
+    if let Err(e) = state.event_sender.event_tx.send(event) {
         error!("Failed to send tool completion event: {:?}", e);
     }
 
@@ -372,7 +360,9 @@ async fn handle_tool_push_agent(
             role: MessageRole::User,
             content: Content::from(vec![ContentBlock::ToolResult(result)]),
         });
-        add_error_message(&state.state, error_msg);
+        state
+            .event_sender
+            .add_message(ChatMessage::error(error_msg));
         return Ok(());
     };
 
@@ -392,13 +382,10 @@ async fn handle_tool_push_agent(
     state.agent_stack.push(new_agent);
 
     // Notify user
-    add_message(
-        &state.state,
-        ChatMessage::system(format!(
-            "🔄 Spawning {} agent for task: {}",
-            agent_type, task
-        )),
-    );
+    state.event_sender.add_message(ChatMessage::system(format!(
+        "🔄 Spawning {} agent for task: {}",
+        agent_type, task
+    )));
 
     Ok(())
 }
@@ -424,10 +411,9 @@ async fn handle_tool_pop_agent(
             .into(),
         });
 
-        add_message(
-            &state.state,
-            ChatMessage::error("Cannot complete task - this is the root agent".to_string()),
-        );
+        state.event_sender.add_message(ChatMessage::error(
+            "Cannot complete task - this is the root agent".to_string(),
+        ));
         return Ok(());
     }
 
@@ -471,7 +457,9 @@ async fn handle_tool_pop_agent(
     };
 
     // Notify user
-    add_message(&state.state, ChatMessage::system(result_message));
+    state
+        .event_sender
+        .add_message(ChatMessage::system(result_message));
 
     Ok(())
 }
@@ -585,7 +573,7 @@ fn emit_retry_event(
         backoff_ms,
     };
 
-    if let Err(e) = state.state.event_tx.send(retry_event) {
+    if let Err(e) = state.event_sender.event_tx.send(retry_event) {
         error!("Failed to send retry event: {:?}", e);
     }
 }

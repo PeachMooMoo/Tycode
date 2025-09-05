@@ -1,8 +1,8 @@
 use crate::agents::coordinator::CoordinatorAgent;
 use crate::chat::{
     ai,
-    events::{ChatEvent, ChatMessage},
-    state::{ChatConfig, SharedChatState},
+    events::{ChatEvent, ChatMessage, EventSender},
+    state::ChatConfig,
 };
 use crate::security::SecurityManager;
 use crate::settings::{ProviderConfig, SettingsManager};
@@ -15,31 +15,51 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-#[derive(Debug, Clone)]
-pub struct AgentCompletionResult {
-    pub success: bool,
-    pub summary: String,
-    pub artifacts: Option<serde_json::Value>,
-}
-
+/// Defines the possible input messages to the `ChatActor`.
+///
+/// These messages derive serde for use across processes. Applications such as
+/// VSCode spawn tycode-core in a sub-process and communicate to the actor over
+/// stdin/stdout. In such applications, these messages are serialized to json
+/// and sent over stdin.
+#[derive(Serialize, Deserialize)]
 pub enum ChatActorMessage {
+    /// A user input to the conversation with the current AI agent
     UserInput(String),
+
+    /// Changes the AI provider (i.e. Bedrock, OpenRouter, etc) that this actor
+    /// is using. This is an in-memory only change that only lasts for the
+    /// duration of this actor's lifetime.
     ChangeProvider(String),
-    ReloadSettings,
-    GetSettings(tokio::sync::oneshot::Sender<Result<serde_json::Value>>),
+
+    /// Sends the current settings (from SettingsManager) to the EventSender
+    GetSettings,
     SaveSettings {
         settings: serde_json::Value,
-        response: tokio::sync::oneshot::Sender<Result<()>>,
     },
 }
 
-/// Handle to interact with the chat actor
+/// The `ChatActor` implements the core (or backend) of tycode.
+///
+/// Tycode UI applications (such as the CLI and VSCode extension) do not
+/// contain any  application logic; instead they are simple UI wrappers that
+/// take input from the user, send it to the actor, and render events from the
+/// actor back in to the UI.
+///
+/// The interface to the actor is essentially two channels: an input and output
+/// channel. `ChatActorMessage` are sent to the input channel by UI
+/// applications and `ChatEvents` are emitted by the actor to the output queue.
+/// The ChatActor struct wraps the input channel and provides some convenience
+/// methods and offers cancellation (technically there is a third cancellation
+/// channel, however that is encapsulated by the ChatActor). Events from the
+/// actor are received through a `mpsc::UnboundedReceiver<ChatEvent>` which is
+/// returned when the actor is launched.
 pub struct ChatActor {
     pub tx: mpsc::UnboundedSender<ChatActorMessage>,
     pub cancel_tx: mpsc::UnboundedSender<()>,
@@ -48,12 +68,12 @@ pub struct ChatActor {
 impl ChatActor {
     /// Launch the chat actor and return a handle to it
     pub fn launch(
-        state: SharedChatState,
         workspace_roots: Vec<PathBuf>,
         settings: SettingsManager,
-    ) -> Self {
+    ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
+        let (event_sender, event_rx) = EventSender::new();
 
         tokio::task::spawn_local(async move {
             let provider = match create_default_provider(&settings).await {
@@ -68,7 +88,7 @@ impl ChatActor {
             let security_manager = SecurityManager::new(security_config);
 
             let actor_state = ActorState {
-                state: state.clone(),
+                event_sender,
                 provider,
                 agent_stack: vec![ActiveAgent::new(Box::new(CoordinatorAgent))],
                 workspace_roots,
@@ -83,22 +103,37 @@ impl ChatActor {
             run_actor(actor_state, rx, cancel_rx).await;
         });
 
-        ChatActor { tx, cancel_tx }
+        (ChatActor { tx, cancel_tx }, event_rx)
     }
 
-    pub async fn send_message(&self, message: String) -> Result<()> {
+    pub fn send_message(&self, message: String) -> Result<()> {
         self.tx.send(ChatActorMessage::UserInput(message))?;
         Ok(())
     }
 
-    pub async fn cancel(&self) -> Result<()> {
+    pub fn change_provider(&self, provider: String) -> Result<()> {
+        self.tx.send(ChatActorMessage::ChangeProvider(provider))?;
+        Ok(())
+    }
+
+    pub fn get_settings(&self) -> Result<()> {
+        self.tx.send(ChatActorMessage::GetSettings)?;
+        Ok(())
+    }
+
+    pub fn save_settings(&self, settings: serde_json::Value) -> Result<()> {
+        self.tx.send(ChatActorMessage::SaveSettings { settings })?;
+        Ok(())
+    }
+
+    pub fn cancel(&self) -> Result<()> {
         self.cancel_tx.send(())?;
         Ok(())
     }
 }
 
 pub struct ActorState {
-    pub state: SharedChatState,
+    pub event_sender: EventSender,
     pub provider: Box<dyn AiProvider>,
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
@@ -123,7 +158,7 @@ async fn run_actor(
             result = process_message(&mut rx, &mut state) => {
                 if let Err(e) = result {
                     error!(?e, "Error processing message");
-                    add_error_message(&state.state, format!("Error: {:?}", e));
+                    state.event_sender.add_message(ChatMessage::error(format!("Error: {:?}", e)));
                 }
             }
 
@@ -134,7 +169,7 @@ async fn run_actor(
             }
         }
 
-        state.state.set_typing(false);
+        state.event_sender.set_typing(false);
     }
 }
 
@@ -145,28 +180,28 @@ async fn process_message(
     let Some(message) = rx.recv().await else {
         bail!("request queue dropped")
     };
-    state.state.set_typing(true);
+
+    // At the start of each event processing, we set "typing" to true to
+    // indicate to UI applications that we are thinking.
+    state.event_sender.set_typing(true);
+
     match message {
         ChatActorMessage::UserInput(input) => handle_user_input(state, input).await,
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
-        ChatActorMessage::ReloadSettings => handle_settings_reload(state).await,
-        ChatActorMessage::GetSettings(response) => {
+        ChatActorMessage::GetSettings => {
             let settings = state.settings.settings();
             let settings_json = serde_json::to_value(settings)
                 .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e));
-            let _ = response.send(settings_json);
+            state
+                .event_sender
+                .event_tx
+                .send(ChatEvent::Settings(settings_json?))?;
             Ok(())
         }
-        ChatActorMessage::SaveSettings { settings, response } => {
-            let result = (|| -> Result<()> {
-                let new_settings: crate::settings::config::Settings =
-                    serde_json::from_value(settings)
-                        .map_err(|e| anyhow::anyhow!("Failed to deserialize settings: {}", e))?;
-                state.settings.save_settings(new_settings)?;
-                state.settings.reload()?;
-                Ok(())
-            })();
-            let _ = response.send(result);
+        ChatActorMessage::SaveSettings { settings } => {
+            let new_settings: crate::settings::config::Settings = serde_json::from_value(settings)
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize settings: {}", e))?;
+            state.settings.save_settings(new_settings)?;
             Ok(())
         }
     }
@@ -174,14 +209,16 @@ async fn process_message(
 
 fn handle_cancelled(state: &mut ActorState) {
     // Send cancellation event
-    let _ = state.state.event_tx.send(ChatEvent::OperationCancelled {
-        message: "Operation cancelled by user".to_string(),
-    });
+    let _ = state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::OperationCancelled {
+            message: "Operation cancelled by user".to_string(),
+        });
 
-    add_message(
-        &state.state,
-        ChatMessage::system("Operation cancelled.".to_string()),
-    );
+    state
+        .event_sender
+        .add_message(ChatMessage::system("Operation cancelled".to_string()));
 }
 
 async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
@@ -193,14 +230,14 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         let messages = crate::chat::commands::process_command(state, command).await;
 
         for message in messages {
-            add_message(&state.state, message);
+            state.event_sender.add_message(message);
         }
         return Ok(());
     }
 
-    state.state.add_to_history(input.clone());
-
-    add_message(&state.state, ChatMessage::user(input.clone()));
+    state
+        .event_sender
+        .add_message(ChatMessage::user(input.clone()));
     ai::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
         content: Content::text_only(input),
@@ -209,34 +246,14 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
     ai::send_ai_request(state).await
 }
 
-async fn handle_settings_reload(state: &mut ActorState) -> Result<()> {
-    info!("Reloading settings from disk");
-    state.settings.reload()?;
-
-    add_message(
-        &state.state,
-        ChatMessage::system("Settings reloaded successfully.".to_string()),
-    );
-
-    Ok(())
-}
-
-fn add_message(state: &SharedChatState, message: ChatMessage) {
-    state.add_message(message);
-}
-
-fn add_error_message(state: &SharedChatState, error: String) {
-    add_message(state, ChatMessage::error(error));
-}
-
 async fn handle_provider_change(state: &mut ActorState, provider_name: String) -> Result<()> {
     info!("Changing provider to: {}", provider_name);
     state.provider = create_provider(&state.settings, &provider_name).await?;
 
-    add_message(
-        &state.state,
-        ChatMessage::system(format!("Switched to provider: {}", provider_name)),
-    );
+    state.event_sender.add_message(ChatMessage::system(format!(
+        "Switched to provider: {}",
+        provider_name
+    )));
 
     Ok(())
 }

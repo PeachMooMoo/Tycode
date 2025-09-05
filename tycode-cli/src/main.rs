@@ -74,7 +74,7 @@ async fn async_main() -> Result<()> {
         .transpose()?;
 
     if args.subprocess {
-        let mut app = SubprocessApp::new(workspace_roots, args.settings_path).await?;
+        let app = SubprocessApp::new(workspace_roots, args.settings_path).await?;
         app.run().await?;
     } else {
         let mut app = InteractiveApp::new(workspace_roots, args.settings_path).await?;

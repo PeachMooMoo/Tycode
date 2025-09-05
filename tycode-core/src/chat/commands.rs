@@ -1,11 +1,12 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::Model;
 use crate::ai::ModelSettings;
+use crate::chat::events::EventSender;
 use crate::chat::{
     actor::ActorState,
     ai::{self, current_agent},
     events::{ChatMessage, MessageSender},
-    state::{FileModificationApi, SharedChatState},
+    state::FileModificationApi,
 };
 use chrono::Utc;
 
@@ -29,7 +30,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "fileapi" => handle_fileapi_command(state, &parts).await,
         "model" => handle_model_command(state, &parts).await,
         "settings" => handle_settings_command(state).await,
-        "security" => handle_security_command(&state.state, &parts).await,
+        "security" => handle_security_command(&state.event_sender, &parts).await,
         "agentmodel" => handle_agentmodel_command(state, &parts).await,
         "agent" => handle_agent_command(state, &parts).await,
         "cost" => handle_cost_command(state).await,
@@ -37,7 +38,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "models" => handle_models_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
-            MessageSender::Error
+            MessageSender::Error,
         )],
     }
 }
@@ -114,7 +115,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
 }
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
-    state.state.clear_conversation();
+    state.event_sender.clear_conversation();
     ai::current_agent_mut(state).conversation.clear();
     vec![create_message(
         "Conversation cleared.".to_string(),
@@ -253,19 +254,19 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                 state.config.file_modification_api = FileModificationApi::Patch;
                 vec![create_message(
                     "File modification API set to: patch".to_string(),
-            MessageSender::Error
+                    MessageSender::Error,
                 )]
             }
             "findreplace" | "find-replace" => {
                 state.config.file_modification_api = FileModificationApi::FindReplace;
                 vec![create_message(
                     "File modification API set to: find-replace".to_string(),
-            MessageSender::Error
+                    MessageSender::Error,
                 )]
             }
             _ => vec![create_message(
                 "Unknown file API. Use: patch, findreplace".to_string(),
-            MessageSender::Error,
+                MessageSender::Error,
             )],
         }
     } else {
@@ -313,7 +314,7 @@ async fn handle_settings_command(state: &ActorState) -> Vec<ChatMessage> {
     vec![create_message(message, MessageSender::System)]
 }
 
-async fn handle_security_command(_state: &SharedChatState, parts: &[&str]) -> Vec<ChatMessage> {
+async fn handle_security_command(_state: &EventSender, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 2 {
         return vec![create_message(
             "Security commands:\n\
@@ -333,7 +334,7 @@ async fn handle_security_command(_state: &SharedChatState, parts: &[&str]) -> Ve
                          Requested mode: {}",
                         mode_str
                     ),
-                    MessageSender::Error
+                    MessageSender::Error,
                 )]
             } else {
                 vec![create_message(
@@ -490,7 +491,14 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
     }
     let agent_name = parts[1];
     if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
-        return vec![create_message(format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")), MessageSender::Error)];
+        return vec![create_message(
+            format!(
+                "Unknown agent: {}. Valid agents: {}",
+                agent_name,
+                AgentCatalog::get_agent_names().join(", ")
+            ),
+            MessageSender::Error,
+        )];
     }
     let model_name = parts[2];
     let model = match Model::from_name(model_name) {
@@ -602,7 +610,10 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
 async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 2 {
         return vec![create_message(
-            format!("Usage: /agent <name>. Valid agents: {}", AgentCatalog::get_agent_names().join(", ")),
+            format!(
+                "Usage: /agent <name>. Valid agents: {}",
+                AgentCatalog::get_agent_names().join(", ")
+            ),
             MessageSender::System,
         )];
     }
@@ -611,7 +622,11 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
 
     if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
         return vec![create_message(
-            format!("Unknown agent: {}. Valid agents: {}", agent_name, AgentCatalog::get_agent_names().join(", ")),
+            format!(
+                "Unknown agent: {}. Valid agents: {}",
+                agent_name,
+                AgentCatalog::get_agent_names().join(", ")
+            ),
             MessageSender::System,
         )];
     }
