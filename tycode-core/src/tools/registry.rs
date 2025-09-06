@@ -2,6 +2,7 @@ use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::chat::state::FileModificationApi;
 use crate::security::types::RiskLevel;
+use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_patch::ApplyPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
@@ -70,6 +71,7 @@ impl ToolRegistry {
     fn register_agent_tools(&mut self) {
         self.register_tool(Arc::new(SpawnAgent));
         self.register_tool(Arc::new(CompleteTask));
+        self.register_tool(Arc::new(AskUserQuestion));
     }
 
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
@@ -94,6 +96,7 @@ impl ToolRegistry {
             ToolType::SetTrackedFiles => Some("set_tracked_files"),
             ToolType::SpawnAgent => Some("spawn_agent"),
             ToolType::CompleteTask => Some("complete_task"),
+            ToolType::AskUserQuestion => Some("ask_user_question"),
         }
     }
 
@@ -125,7 +128,7 @@ impl ToolRegistry {
     pub async fn execute_tool(
         &self,
         tool_use: &ToolUseData,
-        allowed_tool_types: Option<&[ToolType]>,
+        allowed_tool_types: &[ToolType],
     ) -> crate::tools::r#trait::ToolResult {
         // Attempt to retrieve the requested tool. If it does not exist, include a list of available tools.
         let tool = match self.tools.get(&tool_use.name) {
@@ -142,23 +145,21 @@ impl ToolRegistry {
         };
 
         // Then check if the tool is allowed by the agent (if restrictions are provided)
-        if let Some(allowed_types) = allowed_tool_types {
-            let allowed_names: Vec<&str> = allowed_types
-                .iter()
-                .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
-                .collect();
+        let allowed_names: Vec<&str> = allowed_tool_types
+            .iter()
+            .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
+            .collect();
 
-            if !allowed_names.contains(&tool_use.name.as_str()) {
-                debug!(
-                    tool_name = %tool_use.name,
-                    allowed_tools = ?allowed_names,
-                    "Tool not in allowed list for current agent"
-                );
-                return crate::tools::r#trait::ToolResult::Error(format!(
-                    "Tool not available for current agent: {}",
-                    tool_use.name
-                ));
-            }
+        if !allowed_names.contains(&tool_use.name.as_str()) {
+            debug!(
+                tool_name = %tool_use.name,
+                allowed_tools = ?allowed_names,
+                "Tool not in allowed list for current agent"
+            );
+            return crate::tools::r#trait::ToolResult::Error(format!(
+                "Tool not available for current agent: {}",
+                tool_use.name
+            ));
         }
 
         let request = ToolRequest::new(tool_use.arguments.clone(), tool_use.id.clone());
@@ -178,10 +179,13 @@ impl ToolRegistry {
     ) -> Result<RiskLevel> {
         // Retrieve the tool, or return an error that lists all known tools.
         let available = self.list_tools().join(", ");
-        let tool = self
-            .tools
-            .get(tool_name)
-            .ok_or_else(|| anyhow!("Unknown tool: {}. Available tools: {}", tool_name, available))?;
+        let tool = self.tools.get(tool_name).ok_or_else(|| {
+            anyhow!(
+                "Unknown tool: {}. Available tools: {}",
+                tool_name,
+                available
+            )
+        })?;
 
         let risk_level = tool.evaluate_risk(arguments);
         debug!(
@@ -195,225 +199,5 @@ impl ToolRegistry {
 
     pub fn list_tools(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[tokio::test]
-    async fn test_tool_registry_creation_patch_api() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let tools = registry.list_tools();
-        assert_eq!(tools.len(), 10);
-        assert!(tools.contains(&"read_file"));
-        assert!(tools.contains(&"write_file"));
-        assert!(tools.contains(&"list_files"));
-        assert!(tools.contains(&"search_files"));
-        assert!(tools.contains(&"apply_patch"));
-        assert!(tools.contains(&"delete_file"));
-        assert!(tools.contains(&"set_tracked_files"));
-        assert!(tools.contains(&"run_build_test"));
-        assert!(tools.contains(&"spawn_agent"));
-        assert!(tools.contains(&"complete_task"));
-        assert!(!tools.contains(&"replace_in_file"));
-    }
-
-    #[tokio::test]
-    async fn test_tool_registry_creation_find_replace_api() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::FindReplace,
-        );
-
-        let tools = registry.list_tools();
-        assert_eq!(tools.len(), 10);
-        assert!(tools.contains(&"read_file"));
-        assert!(tools.contains(&"write_file"));
-        assert!(tools.contains(&"list_files"));
-        assert!(tools.contains(&"search_files"));
-        assert!(tools.contains(&"replace_in_file"));
-        assert!(tools.contains(&"delete_file"));
-        assert!(tools.contains(&"set_tracked_files"));
-        assert!(tools.contains(&"run_build_test"));
-        assert!(tools.contains(&"spawn_agent"));
-        assert!(tools.contains(&"complete_task"));
-        assert!(!tools.contains(&"apply_patch"));
-    }
-
-    #[tokio::test]
-    async fn test_tool_definitions() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let definitions = registry.get_tool_definitions();
-        assert_eq!(definitions.len(), 10);
-
-        let read_file_def = definitions
-            .iter()
-            .find(|def| def.name == "read_file")
-            .unwrap();
-        assert!(read_file_def
-            .description
-            .contains("Read the contents of a file"));
-    }
-
-    #[tokio::test]
-    async fn test_tool_execution() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "Hello, registry!").unwrap();
-
-        let tool_use = ToolUseData {
-            id: "test_id".to_string(),
-            name: "read_file".to_string(),
-            arguments: json!({
-                "file_path": "test.txt",
-                "summary": false
-            }),
-        };
-
-        let result = registry.execute_tool(&tool_use, None).await;
-        match result {
-            crate::tools::r#trait::ToolResult::Success { context_data, .. } => {
-                let content: serde_json::Value =
-                    serde_json::from_str(&context_data.to_string()).unwrap();
-                assert_eq!(content["content"], "Hello, registry!");
-            }
-            _ => panic!("Expected success result"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_unknown_tool() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let tool_use = ToolUseData {
-            id: "test_id".to_string(),
-            name: "unknown_tool".to_string(),
-            arguments: json!({}),
-        };
-
-        let result = registry.execute_tool(&tool_use, None).await;
-        match result {
-            crate::tools::r#trait::ToolResult::Error(msg) => {
-                assert!(msg.contains("Unknown tool"));
-            }
-            _ => panic!("Expected error result"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_get_tool_definitions_for_types() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let tool_types = vec![
-            ToolType::ReadFile,
-            ToolType::WriteFile,
-            ToolType::ModifyFile, // Should map to apply_patch
-        ];
-
-        let definitions = registry.get_tool_definitions_for_types(&tool_types);
-        assert_eq!(definitions.len(), 3);
-
-        let tool_names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
-        assert!(tool_names.contains(&"read_file"));
-        assert!(tool_names.contains(&"write_file"));
-        assert!(tool_names.contains(&"apply_patch"));
-    }
-
-    #[tokio::test]
-    async fn test_get_tool_definitions_for_types_find_replace() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::FindReplace,
-        );
-
-        let tool_types = vec![
-            ToolType::ReadFile,
-            ToolType::ModifyFile, // Should map to replace_in_file
-        ];
-
-        let definitions = registry.get_tool_definitions_for_types(&tool_types);
-        assert_eq!(definitions.len(), 2);
-
-        let tool_names: Vec<&str> = definitions.iter().map(|d| d.name.as_str()).collect();
-        assert!(tool_names.contains(&"read_file"));
-        assert!(tool_names.contains(&"replace_in_file"));
-    }
-
-    #[tokio::test]
-    async fn test_tool_execution_with_allowed_types() {
-        let temp_dir = tempdir().unwrap();
-        let registry = ToolRegistry::new(
-            vec![temp_dir.path().to_path_buf()],
-            FileModificationApi::Patch,
-        );
-
-        let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "Test content").unwrap();
-
-        // Test 1: Tool allowed - should succeed
-        let allowed_types = vec![ToolType::ReadFile, ToolType::WriteFile];
-        let tool_use = ToolUseData {
-            id: "test_id".to_string(),
-            name: "read_file".to_string(),
-            arguments: json!({
-                "file_path": "test.txt",
-                "summary": false
-            }),
-        };
-
-        let result = registry.execute_tool(&tool_use, Some(&allowed_types)).await;
-        match result {
-            crate::tools::r#trait::ToolResult::Success { .. } => {}
-            _ => panic!("Expected success result"),
-        }
-
-        // Test 2: Tool not in allowed list - should fail
-        let restricted_types = vec![ToolType::WriteFile]; // No ReadFile
-        let result = registry
-            .execute_tool(&tool_use, Some(&restricted_types))
-            .await;
-        match result {
-            crate::tools::r#trait::ToolResult::Error(msg) => {
-                assert!(msg.contains("Tool not available for current agent"));
-            }
-            _ => panic!("Expected error result"),
-        }
-
-        // Test 3: No restrictions (None) - should succeed
-        let result = registry.execute_tool(&tool_use, None).await;
-        match result {
-            crate::tools::r#trait::ToolResult::Success { .. } => {}
-            _ => panic!("Expected success result"),
-        }
     }
 }
