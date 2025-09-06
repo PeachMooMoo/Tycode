@@ -41,12 +41,7 @@ pub enum ProviderConfig {
         behavior: MockBehaviorConfig,
     },
     #[serde(rename = "openrouter")]
-    OpenRouter {
-        api_key: String,
-    },
-    // Future providers can be added here:
-    // #[serde(rename = "openai")]
-    // OpenAI { api_key: String },
+    OpenRouter { api_key: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

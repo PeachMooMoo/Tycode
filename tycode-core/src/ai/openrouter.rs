@@ -39,6 +39,7 @@ impl OpenRouterProvider {
             Model::ClaudeSonnet37 => "anthropic/claude-3.7-sonnet",
             Model::GptOss120b => "openai/gpt-oss-120b",
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
+            Model::Qwen3Coder => "qwen/qwen3-coder",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -89,6 +90,7 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeSonnet37,
             Model::GptOss120b,
             Model::GrokCodeFast1,
+            Model::Qwen3Coder,
         ]
     }
 
@@ -199,6 +201,7 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeSonnet37 => Cost::new(0.003, 0.015),
             Model::GptOss120b => Cost::new(0.0001, 0.0005),
             Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
+            Model::Qwen3Coder => Cost::new(0.00035, 0.0015),
             _ => Cost::new(0.0, 0.0),
         }
     }

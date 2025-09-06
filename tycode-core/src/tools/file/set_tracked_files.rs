@@ -1,7 +1,7 @@
 use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -48,22 +48,41 @@ impl ToolExecutor for SetTrackedFilesTool {
     }
 
     async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
-        let file_paths = request.arguments
+        // Handle file_paths as either array or string to support qwen3-coder,
+        // which tends to provide strings that are JSON arrays or single paths.
+        // We don't advertise this as a supported capability to models, but if
+        // get a malformed request we do our best to figure out what they meant
+        let mut file_paths_value = request
+            .arguments
             .get("file_paths")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_paths"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_paths"))?
+            .clone();
+
+        let file_paths_arr: Vec<String> = loop {
+            match file_paths_value {
+                Value::Array(arr) => {
+                    break arr
+                        .into_iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                }
+                Value::String(s) => match serde_json::from_str::<Value>(&s) {
+                    Ok(value) => file_paths_value = value,
+                    Err(_) => bail!("file_paths must be an array of strings"),
+                },
+                _ => bail!("file_paths must be an array of strings"),
+            }
+        };
 
         let mut new_paths = Vec::new();
         let mut invalid_files = Vec::new();
 
         // Validate all files exist
-        for path_value in file_paths {
-            if let Some(path_str) = path_value.as_str() {
-                if self.file_manager.file_exists(path_str).await? {
-                    new_paths.push(PathBuf::from(path_str));
-                } else {
-                    invalid_files.push(path_str.to_string());
-                }
+        for path_str in &file_paths_arr {
+            if self.file_manager.file_exists(path_str).await? {
+                new_paths.push(PathBuf::from(path_str));
+            } else {
+                invalid_files.push(path_str.to_string());
             }
         }
 
@@ -107,7 +126,7 @@ impl ToolExecutor for SetTrackedFilesTool {
                 } else {
                     format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
                 }
-            })
+            }),
         ))
     }
 }

@@ -1,4 +1,4 @@
-# Rust build artifacts
+Git # Rust build artifacts
 target/
 Cargo.lock
 
@@ -26,3 +26,9 @@ yarn-error.log*
 # Project-specific
 .brazil/
 .tycode/
+
+# TyCode Client TypeScript
+tycode-client-typescript/bin/
+tycode-client-typescript/lib/
+*.tsbuildinfo
+tycode-client-typescript/package-lock.json

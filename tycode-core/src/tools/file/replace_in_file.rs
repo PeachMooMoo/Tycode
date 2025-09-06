@@ -1,7 +1,7 @@
 use crate::security::types::RiskLevel;
 use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -108,11 +108,35 @@ impl ToolExecutor for ReplaceInFileTool {
             .get("diff")
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff"))?;
 
+        // Handle diff as either array or string to support qwen3-coder,
+        // which tends to provide strings that are JSON arrays or diffs.
+        // We don't advertise this as a supported capability to models, but if
+        // we get a malformed request we do our best to figure out what they meant
+        let mut diff_value_parsed = diff_value.clone();
+        let diff_arr: Vec<Value> = loop {
+            match diff_value_parsed {
+                Value::Array(arr) => {
+                    break arr;
+                }
+                Value::String(s) => match serde_json::from_str::<Value>(&s) {
+                    Ok(value) => diff_value_parsed = value,
+                    Err(_) => bail!("diff must be an array of search and replace blocks"),
+                },
+                _ => bail!("diff must be an array of search and replace blocks"),
+            }
+        };
+
         // Read the current content using FileAccessManager
         let original_content = self.file_manager.read_file(file_path).await?;
 
         // Parse and apply the diff
-        let replacements: Vec<SearchReplaceBlock> = serde_json::from_value(diff_value.clone())?;
+        let replacements: Vec<SearchReplaceBlock> = diff_arr
+            .into_iter()
+            .map(|item| {
+                serde_json::from_value(item)
+                    .map_err(|e| anyhow::anyhow!("Invalid diff entry: {e:?}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let replacement_count = replacements.len();
         let new_content = self.apply_replacements(&original_content, replacements)?;
 
