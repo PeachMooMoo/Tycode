@@ -139,47 +139,57 @@ pub struct ConversationRequest {
     pub tools: Vec<ToolDefinition>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ReasoningBudget {
+    Off,
+    Low,
+    High,
+}
+
+impl ReasoningBudget {
+    pub fn get_max_tokens(&self) -> Option<u32> {
+        match self {
+            ReasoningBudget::Off => None,
+            ReasoningBudget::Low => Some(4000),
+            ReasoningBudget::High => Some(8000),
+        }
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        if value == 0 {
+            ReasoningBudget::Off
+        } else if value <= 4000 {
+            ReasoningBudget::Low
+        } else {
+            ReasoningBudget::High
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ReasoningBudget::Off => write!(f, "off"),
+            ReasoningBudget::Low => write!(f, "low"),
+            ReasoningBudget::High => write!(f, "high"),
+        }
+    }
+}
+
+impl Default for ReasoningBudget {
+    fn default() -> Self {
+        ReasoningBudget::High
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+
 pub struct ModelSettings {
     pub model: Model,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
-    pub reasoning_budget: Option<u32>,
-}
-
-impl ModelSettings {
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(reasoning_budget) = self.reasoning_budget {
-            if let Some(max_tokens) = self.max_tokens {
-                if max_tokens <= reasoning_budget {
-                    return Err(format!(
-                        "max_tokens ({}) must be greater than reasoning_budget ({})",
-                        max_tokens, reasoning_budget
-                    ));
-                }
-            } else {
-                return Err("max_tokens is required when using reasoning_budget".to_string());
-            }
-
-            if let Some(temperature) = self.temperature {
-                if temperature != 1.0 {
-                    return Err(format!(
-                        "temperature must be 1.0 when using reasoning_budget, got {}",
-                        temperature
-                    ));
-                }
-            } else {
-                return Err("temperature must be 1.0 when using reasoning_budget".to_string());
-            }
-        }
-        Ok(())
-    }
-
-    pub fn default_model_settings_for_name(model_name: &str) -> Option<ModelSettings> {
-        let model = Model::from_name(model_name)?;
-        Some(model.default_settings())
-    }
+    pub reasoning_budget: ReasoningBudget,
 }
 
 #[derive(Debug, Clone)]
@@ -259,7 +269,7 @@ impl Content {
 
     pub fn text_only(text: String) -> Self {
         Self {
-            blocks: vec![ContentBlock::Text(text)],
+            blocks: vec![ContentBlock::Text(text.trim().to_string())],
         }
     }
 

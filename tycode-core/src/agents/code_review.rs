@@ -2,6 +2,7 @@ use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::types::ModelSettings;
+use crate::ai::ReasoningBudget;
 
 /// Agent that reviews a proposed code change against the project's style mandates.
 /// It receives a diff (search/replace) and must either approve it or reject it with
@@ -50,8 +51,7 @@ If the change violates any mandate, reject it by invoking `complete_task` with s
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,
-            reasoning_budget: Some(8000),
-            // reasoning_budget: None,
+            reasoning_budget: ReasoningBudget::High,
         }
     }
 

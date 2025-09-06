@@ -2,6 +2,7 @@ use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::types::ModelSettings;
+use crate::ai::ReasoningBudget;
 
 pub struct CoderAgent;
 
@@ -54,8 +55,7 @@ Remember: The user is here to help you! It is always better to stop and ask the 
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,
-            reasoning_budget: Some(8000),
-            // reasoning_budget: None,
+            reasoning_budget: ReasoningBudget::High,
         }
     }
 

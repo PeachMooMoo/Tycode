@@ -1,6 +1,6 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::Model;
-use crate::ai::ModelSettings;
+use crate::ai::{ModelSettings, ReasoningBudget};
 use crate::chat::events::EventSender;
 use crate::chat::{
     actor::ActorState,
@@ -462,12 +462,7 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     if settings.top_p.is_some() {
         overrides.push(format!("top_p={}", settings.top_p.unwrap()));
     }
-    if settings.reasoning_budget.is_some() {
-        overrides.push(format!(
-            "reasoning_budget={}",
-            settings.reasoning_budget.unwrap()
-        ));
-    }
+    overrides.push(format!("reasoning_budget={}", settings.reasoning_budget));
 
     let overrides_str = if overrides.is_empty() {
         "".to_string()
@@ -538,9 +533,8 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
     if let Some(v) = settings.top_p {
         overrides.push(format!("top_p={}", v));
     }
-    if let Some(v) = settings.reasoning_budget {
-        overrides.push(format!("reasoning_budget={}", v));
-    }
+    overrides.push(format!("reasoning_budget={}", settings.reasoning_budget));
+
     let overrides_str = if overrides.is_empty() {
         "".to_string()
     } else {
@@ -582,15 +576,17 @@ fn parse_model_settings_overrides(
                 settings.top_p = Some(v);
             }
             "reasoning_budget" => {
-                let v: u32 = value_str.parse().map_err(|_| format!("Invalid reasoning_budget value: {}. Expected a positive integer (e.g., 1024).", value_str))?;
-                settings.reasoning_budget = Some(v);
+                let reasoning_budget = match value_str {
+                    "High" | "high" => ReasoningBudget::High,
+                    "Low" | "low" => ReasoningBudget::Low,
+                    "Off" | "off" => ReasoningBudget::Off,
+                    _ => return Err("Unsupported reasoning budget - must be one of high low or off".to_string())
+                };
+                settings.reasoning_budget = reasoning_budget;
             }
             _ => return Err(format!("Unknown parameter: {}. Valid parameters: temperature, max_tokens, top_p, reasoning_budget", key)),
         }
     }
-    settings
-        .validate()
-        .map_err(|e| format!("Invalid settings: {}", e))?;
     Ok(settings)
 }
 

@@ -2,6 +2,7 @@ use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::types::ModelSettings;
+use crate::ai::ReasoningBudget;
 
 pub struct CoordinatorAgent;
 
@@ -62,8 +63,7 @@ Critical: User approval must be obtained before executing a plan. If you need to
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,
-            reasoning_budget: Some(8000),
-            // reasoning_budget: None,
+            reasoning_budget: ReasoningBudget::High,
         }
     }
 

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::ModelSettings;
 
+use crate::ai::types::ReasoningBudget;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Model {
     ClaudeOpus41,
@@ -63,7 +65,7 @@ impl Model {
             max_tokens: Some(32000),
             temperature: Some(1.0),
             top_p: None,
-            reasoning_budget: Some(8000),
+            reasoning_budget: ReasoningBudget::High,
         }
     }
 }

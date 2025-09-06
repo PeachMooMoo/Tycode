@@ -218,11 +218,6 @@ impl AiProvider for BedrockProvider {
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
-        request
-            .model
-            .validate()
-            .map_err(|e| AiError::Terminal(anyhow::anyhow!(e)))?;
-
         let model_id = self.get_bedrock_model_id(&request.model.model)?;
         let bedrock_messages = self.convert_to_bedrock_messages(&request.messages)?;
 
@@ -257,16 +252,13 @@ impl AiProvider for BedrockProvider {
 
         converse_request = converse_request.inference_config(inference_config_builder.build());
 
-        if let Some(reasoning_budget) = request.model.reasoning_budget {
-            tracing::info!(
-                "🧠 Enabling reasoning with budget {} tokens",
-                reasoning_budget
-            );
+        if let Some(max_tokens) = request.model.reasoning_budget.get_max_tokens() {
+            tracing::info!("🧠 Enabling reasoning with budget {} tokens", max_tokens);
 
             let reasoning_params = json!({
                 "thinking": {
                     "type": "enabled",
-                    "budget_tokens": reasoning_budget
+                    "budget_tokens": max_tokens
                 }
             });
             converse_request =

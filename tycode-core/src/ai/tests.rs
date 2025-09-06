@@ -12,7 +12,7 @@ pub async fn test_hello_world_model<P: AiProvider>(provider: &P, model: Model) -
             max_tokens: Some(100),
             temperature: Some(0.7),
             top_p: None,
-            reasoning_budget: None,
+            reasoning_budget: ReasoningBudget::Off,
         },
         system_prompt: "You are a helpful AI assistant.".to_string(),
         stop_sequences: Vec::new(),
@@ -115,7 +115,7 @@ pub async fn test_reasoning_conversation<P: AiProvider>(provider: P) -> Result<(
                 max_tokens: Some(9000),
                 temperature: Some(1.0),
                 top_p: None,
-                reasoning_budget: Some(8000),
+                reasoning_budget: ReasoningBudget::High,
             },
             system_prompt:
                 "You are a helpful AI assistant. Think step by step and provide clear explanations."
@@ -201,7 +201,7 @@ pub async fn test_reasoning_conversation<P: AiProvider>(provider: P) -> Result<(
                 max_tokens: Some(9000),
                 temperature: Some(1.0),
                 top_p: None,
-                reasoning_budget: Some(8000),
+                reasoning_budget: ReasoningBudget::High,
             },
             system_prompt:
                 "You are a helpful AI assistant. Think step by step and provide clear explanations."
@@ -322,7 +322,7 @@ pub async fn test_tool_usage<P: AiProvider>(provider: P) -> Result<()> {
                 max_tokens: Some(1000),
                 temperature: Some(0.1),
                 top_p: None,
-                reasoning_budget: None,
+                reasoning_budget: ReasoningBudget::Off,
             },
             system_prompt: "You are a helpful AI assistant. When asked to perform calculations, use the calculator tool provided.".to_string(),
             stop_sequences: Vec::new(),
@@ -449,7 +449,7 @@ pub async fn test_reasoning_with_tools<P: AiProvider>(provider: P) -> Result<()>
                 max_tokens: Some(3000),
                 temperature: Some(1.0),
                 top_p: None,
-                reasoning_budget: Some(2000),
+                reasoning_budget: ReasoningBudget::Low,
             },
             system_prompt: "You are a helpful AI assistant. Think step by step when solving problems and use the calculator tool when you need to perform arithmetic calculations.".to_string(),
             stop_sequences: Vec::new(),
