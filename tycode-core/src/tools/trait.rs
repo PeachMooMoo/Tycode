@@ -44,6 +44,9 @@ pub enum ToolResult {
         summary: String,
         artifacts: Option<Value>,
     },
+    /// Halt the AI loop after executing this tool and prompt the user with the
+    /// provided question
+    PromptUser { question: String },
 }
 
 impl ToolResult {

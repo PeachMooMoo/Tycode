@@ -90,11 +90,11 @@ Remember: The user is here to help you! It is always better to stop and ask the 
             ToolType::WriteFile,
             ToolType::ModifyFile,
             ToolType::DeleteFile,
-            ToolType::SearchFiles,
             ToolType::RunBuildTestCommand,
             ToolType::AskUserQuestion,
+            ToolType::CompleteTask,
+            // ToolType::SearchFiles,
             // ToolType::SpawnAgent,
-            // ToolType::CompleteTask,
             // ToolType::ReadFile,
             // ToolType::ListFiles,
         ]

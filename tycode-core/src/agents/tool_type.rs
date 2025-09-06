@@ -10,6 +10,7 @@ pub enum ToolType {
     SetTrackedFiles,
     SpawnAgent,
     CompleteTask,
+    AskUserQuestion,
 }
 
 impl ToolType {
@@ -25,6 +26,7 @@ impl ToolType {
             Self::SetTrackedFiles => "set_tracked_files",
             Self::SpawnAgent => "spawn_agent",
             Self::CompleteTask => "complete_task",
+            Self::AskUserQuestion => "ask_user_question",
         }
     }
 
@@ -40,6 +42,7 @@ impl ToolType {
             "set_tracked_files" => Some(Self::SetTrackedFiles),
             "spawn_agent" => Some(Self::SpawnAgent),
             "complete_task" => Some(Self::CompleteTask),
+            "ask_user_question" => Some(Self::AskUserQuestion),
             _ => None,
         }
     }

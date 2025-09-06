@@ -76,11 +76,23 @@ impl AiProvider for MockProvider {
 
         match &mut *behavior {
             MockBehavior::Success => {
-                // Return a simple success response
+                let content = if !_request.tools.is_empty() {
+                    let tool_use = ToolUseData {
+                        id: "mock_tool_id".to_string(),
+                        name: _request.tools[0].name.clone(),
+                        arguments: serde_json::json!({}),
+                    };
+                    Content::new(vec![
+                        ContentBlock::Text("Mock response".to_string()),
+                        ContentBlock::ToolUse(tool_use),
+                    ])
+                } else {
+                    Content::text_only("Mock response".to_string())
+                };
                 Ok(ConversationResponse {
-                    content: Content::text_only("Mock response".to_string()),
+                    content,
                     usage: TokenUsage::new(10, 10),
-                    stop_reason: StopReason::EndTurn,
+                    stop_reason: if !_request.tools.is_empty() { StopReason::ToolUse } else { StopReason::EndTurn },
                 })
             }
             MockBehavior::RetryableErrorThenSuccess { remaining_errors } => {

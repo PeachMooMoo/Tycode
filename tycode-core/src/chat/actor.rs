@@ -1,4 +1,4 @@
-use crate::agents::coordinator::CoordinatorAgent;
+use crate::agents::one_shot::OneShotAgent;
 use crate::chat::{
     ai,
     events::{ChatEvent, ChatMessage, EventSender},
@@ -90,7 +90,7 @@ impl ChatActor {
             let actor_state = ActorState {
                 event_sender,
                 provider,
-                agent_stack: vec![ActiveAgent::new(Box::new(CoordinatorAgent))],
+                agent_stack: vec![ActiveAgent::new(Box::new(OneShotAgent))],
                 workspace_roots,
                 security_manager,
                 settings,

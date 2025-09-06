@@ -13,6 +13,7 @@ use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::ToolResult;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
+use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -51,8 +52,12 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         // If there are tool calls, execute them and continue the loop
         if !tool_calls.is_empty() {
-            Box::pin(execute_tool_calls(state, tool_calls)).await?;
-            continue;
+            let invoke_ai = Box::pin(execute_tool_calls(state, tool_calls)).await?;
+            if invoke_ai {
+                continue;
+            } else {
+                break;
+            }
         }
 
         // No more tool calls, exit the loop
@@ -182,7 +187,7 @@ fn process_ai_response(
     tool_calls
 }
 
-async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>) -> Result<()> {
+async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>) -> Result<bool> {
     info!(
         tool_count = tool_calls.len(),
         tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
@@ -197,29 +202,32 @@ async fn execute_tool_calls(state: &mut ActorState, tool_calls: Vec<ToolUseData>
     let file_modification_api = state.config.file_modification_api.clone();
     let tool_registry = ToolRegistry::new(state.workspace_roots.clone(), file_modification_api);
 
+    let mut invoke_ai = true;
     for tool_use in &tool_calls {
         let tool_result =
             execute_tool_with_security(state, &tool_registry, tool_use, &allowed_tool_types).await;
 
-        handle_tool_result(state, tool_result, tool_use).await?;
+        invoke_ai = invoke_ai && handle_tool_result(state, tool_result, tool_use).await?;
     }
-    Ok(())
+    Ok(invoke_ai)
 }
 
 async fn handle_tool_result(
     state: &mut ActorState,
     tool_result: crate::tools::r#trait::ToolResult,
     tool_use: &ToolUseData,
-) -> Result<()> {
-    match tool_result {
+) -> Result<bool> {
+    let invoke_ai = match tool_result {
         ToolResult::Success {
             context_data,
             ui_data,
         } => {
             handle_tool_success(state, tool_use, context_data, ui_data);
+            true
         }
         ToolResult::Error(error) => {
             handle_tool_error(state, tool_use, error);
+            true
         }
         ToolResult::PushAgent {
             agent_type,
@@ -227,16 +235,33 @@ async fn handle_tool_result(
             context,
         } => {
             handle_tool_push_agent(state, agent_type, task, context, tool_use.id.clone()).await?;
+            true
         }
         ToolResult::PopAgent {
             success,
             summary,
             artifacts,
-        } => {
-            handle_tool_pop_agent(state, success, summary, artifacts, tool_use.id.clone()).await?;
+        } => handle_tool_pop_agent(state, success, summary, artifacts, tool_use.id.clone()).await?,
+        ToolResult::PromptUser { question } => {
+            let result = ToolResultData {
+                tool_use_id: tool_use.id.clone(),
+                content: json!({}).to_string(),
+                is_error: false,
+            };
+
+            state.event_sender.add_message(ChatMessage::system(format!(
+                "The agent has a question: {question}"
+            )));
+
+            // Add to conversation - just the tool result, context will be added later
+            current_agent_mut(state).conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::from(vec![ContentBlock::ToolResult(result)]),
+            });
+            false
         }
-    }
-    Ok(())
+    };
+    Ok(invoke_ai)
 }
 
 fn handle_tool_success(
@@ -396,7 +421,7 @@ async fn handle_tool_pop_agent(
     summary: String,
     artifacts: Option<serde_json::Value>,
     tool_use_id: String,
-) -> Result<()> {
+) -> Result<bool> {
     info!("Popping agent: success={}, summary={}", success, summary);
 
     // Don't pop if we're at the root agent
@@ -405,16 +430,16 @@ async fn handle_tool_pop_agent(
             role: MessageRole::User,
             content: ContentBlock::ToolResult(ToolResultData {
                 tool_use_id,
-                content: "Cannot complete task; you are the root agent".to_string(),
-                is_error: true,
+                content: json!({}).to_string(),
+                is_error: false,
             })
             .into(),
         });
 
-        state.event_sender.add_message(ChatMessage::error(
-            "Cannot complete task - this is the root agent".to_string(),
-        ));
-        return Ok(());
+        state.event_sender.add_message(ChatMessage::system(format!(
+            "Task completed [success={success}]: {summary}"
+        )));
+        return Ok(false);
     }
 
     state.agent_stack.pop();
@@ -461,7 +486,7 @@ async fn handle_tool_pop_agent(
         .event_sender
         .add_message(ChatMessage::system(result_message));
 
-    Ok(())
+    Ok(true)
 }
 
 async fn build_message_context(state: &ActorState) -> MessageContext {

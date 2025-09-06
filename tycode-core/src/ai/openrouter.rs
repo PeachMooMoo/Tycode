@@ -120,7 +120,7 @@ impl AiProvider for OpenRouterProvider {
                 None
             },
             tool_choice: if !request.tools.is_empty() {
-                Some(ToolChoice::Simple("auto".to_string()))
+                Some(ToolChoice::Simple("required".to_string()))
             } else {
                 None
             },
