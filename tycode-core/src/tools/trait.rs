@@ -1,6 +1,7 @@
 use crate::security::types::RiskLevel;
 use anyhow::Result;
 use serde_json::Value;
+use std::path::PathBuf;
 
 /// Request passed to tool execution
 #[derive(Debug, Clone)]
@@ -22,6 +23,23 @@ impl ToolRequest {
     }
 }
 
+/// File modification operation type
+#[derive(Debug, Clone)]
+pub enum FileOperation {
+    Create,
+    Update,
+    Delete,
+}
+
+/// File modification details
+#[derive(Debug, Clone)]
+pub struct FileModification {
+    pub path: PathBuf,
+    pub operation: FileOperation,
+    pub original_content: Option<String>,
+    pub new_content: Option<String>,
+}
+
 /// Result from tool execution
 #[derive(Debug)]
 pub enum ToolResult {
@@ -32,6 +50,8 @@ pub enum ToolResult {
     },
     /// Error result
     Error(String),
+    /// File modification that needs to be applied
+    FileModification(FileModification),
     /// Push a new agent onto the stack
     PushAgent {
         agent_type: String,

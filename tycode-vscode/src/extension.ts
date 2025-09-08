@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import { MainProvider } from './mainProvider';
 import { SettingsProvider } from './settingsProvider';
-import { SubprocessBridge } from './subprocessBridge';
+import { ChatActorClient } from '../lib/client';
 
 let mainProvider: MainProvider;
 let settingsProvider: SettingsProvider;
-let settingsBridge: SubprocessBridge;
+let settingsClient: ChatActorClient;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('TyCode extension is activating...');
@@ -77,13 +77,12 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register settings command
     context.subscriptions.push(
         vscode.commands.registerCommand('tycode.openSettings', async () => {
-            // Create a settings bridge on demand
-            if (!settingsBridge) {
+            // Create a settings client on demand
+            if (!settingsClient) {
                 const workspaceRoots = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
-                
-                settingsBridge = new SubprocessBridge(context, workspaceRoots);
-                await settingsBridge.initialize();
-                settingsProvider = new SettingsProvider(context, settingsBridge);
+                // Use default settings path (~/.tycode/settings.toml)
+                settingsClient = new ChatActorClient(workspaceRoots);
+                settingsProvider = new SettingsProvider(context, settingsClient);
             }
             settingsProvider.show();
         })
@@ -99,7 +98,7 @@ export function deactivate() {
     if (settingsProvider) {
         settingsProvider.dispose();
     }
-    if (settingsBridge) {
-        settingsBridge.dispose();
+    if (settingsClient) {
+        settingsClient.close();
     }
 }

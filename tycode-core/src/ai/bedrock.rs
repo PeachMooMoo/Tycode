@@ -1,10 +1,9 @@
 use aws_sdk_bedrockruntime::{
     operation::converse::ConverseError,
     types::{
-        AnyToolChoice, ContentBlock as BedrockContentBlock, Message as BedrockMessage,
-        ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock, Tool, ToolChoice,
-        ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
-        ToolSpecification, ToolUseBlock,
+        ContentBlock as BedrockContentBlock, Message as BedrockMessage, ReasoningContentBlock,
+        ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration, ToolInputSchema,
+        ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
     },
     Client as BedrockClient,
 };
@@ -286,7 +285,6 @@ impl AiProvider for BedrockProvider {
 
             let tool_config = ToolConfiguration::builder()
                 .set_tools(Some(bedrock_tools))
-                .tool_choice(ToolChoice::Any(AnyToolChoice::builder().build()))
                 .build()
                 .expect("Failed to build tool config");
             converse_request = converse_request.tool_config(tool_config);

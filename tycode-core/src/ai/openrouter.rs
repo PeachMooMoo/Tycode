@@ -120,7 +120,7 @@ impl AiProvider for OpenRouterProvider {
                 None
             },
             tool_choice: if !request.tools.is_empty() {
-                Some(ToolChoice::Simple("required".to_string()))
+                Some(ToolChoice::Simple("auto".to_string()))
             } else {
                 None
             },
@@ -153,6 +153,8 @@ impl AiProvider for OpenRouterProvider {
                 AiError::Retryable(anyhow::anyhow!("Network error: {}", e))
             })?;
 
+        tracing::info!("Response: {response:?}");
+
         let status = response.status();
         let response_text = response
             .text()
@@ -161,23 +163,6 @@ impl AiProvider for OpenRouterProvider {
 
         if !status.is_success() {
             debug!(?status, ?response_text, "OpenRouter API returned error");
-
-            // Try to parse error response
-            if let Ok(error_response) =
-                serde_json::from_str::<OpenRouterErrorResponse>(&response_text)
-            {
-                let error_msg = format!(
-                    "OpenRouter API error: {} - {}",
-                    error_response.error.code, error_response.error.message
-                );
-
-                // Map specific errors to retryable vs terminal
-                if status.as_u16() >= 500 || status.as_u16() == 429 {
-                    return Err(AiError::Retryable(anyhow::anyhow!(error_msg)));
-                } else {
-                    return Err(AiError::Terminal(anyhow::anyhow!(error_msg)));
-                }
-            }
 
             return Err(AiError::Terminal(anyhow::anyhow!(
                 "OpenRouter API error {}: {}",

@@ -1,6 +1,7 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::Model;
 use crate::ai::{ModelSettings, ReasoningBudget};
+use crate::chat::actor::create_provider;
 use crate::chat::events::EventSender;
 use crate::chat::{
     actor::ActorState,
@@ -8,7 +9,10 @@ use crate::chat::{
     events::{ChatMessage, MessageSender},
     state::FileModificationApi,
 };
+use crate::settings::config::ReviewLevel;
 use chrono::Utc;
+
+use crate::file::context::build_message_context;
 
 #[derive(Clone, Debug)]
 pub struct CommandInfo {
@@ -33,9 +37,11 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "security" => handle_security_command(&state.event_sender, &parts).await,
         "agentmodel" => handle_agentmodel_command(state, &parts).await,
         "agent" => handle_agent_command(state, &parts).await,
+        "review_level" => handle_review_level_command(state, &parts).await,
         "cost" => handle_cost_command(state).await,
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
+        "provider" => handle_provider_command(state, &parts).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
             MessageSender::Error,
@@ -97,6 +103,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             usage: "/models".to_string(),
         },
         CommandInfo {
+            name: "provider".to_string(),
+            description: "List or change the active AI provider".to_string(),
+            usage: "/provider [name]".to_string(),
+        },
+        CommandInfo {
             name: "agentmodel".to_string(),
             description: "Set the AI model for a specific agent with tunings".to_string(),
             usage: "/agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]".to_string(),
@@ -105,6 +116,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "agent".to_string(),
             description: "Switch the current agent".to_string(),
             usage: "/agent <name>".to_string(),
+        },
+        CommandInfo {
+            name: "review_level".to_string(),
+            description: "Set the review level (None, Modification, All)".to_string(),
+            usage: "/review_level <level>".to_string(),
         },
         CommandInfo {
             name: "quit".to_string(),
@@ -124,127 +140,12 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
 }
 
 async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
-    use crate::tools::context_utils::list_relevant_files;
-    use crate::tools::file_access::FileAccessManager;
-    use std::path::PathBuf;
-
-    let working_dir = PathBuf::from(".");
-
-    // Get relevant files (directory listing)
-    let relevant = list_relevant_files(&[working_dir.clone()]);
-
-    // Get tracked files
-    let file_manager = FileAccessManager::new(vec![working_dir.clone()]);
-
-    let mut message = String::new();
-    message.push_str(r"=== AI Context Debug Info ===\n\n");
-
-    // Show directory listing info
-    message.push_str(r"DIRECTORY LISTING (file paths only):\n");
-    message.push_str(&format!(r"  Total files: {}\n", relevant.files.len()));
-    if relevant.truncated {
-        message.push_str(r"  ⚠️ WARNING: Directory listing was TRUNCATED (too many files)\n");
-    }
-
-    // Group files by directory for better readability
-    let mut dirs: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for file in &relevant.files {
-        let file_str = file.to_string_lossy().to_string();
-        if file_str == "..." {
-            continue; // Skip truncation marker
-        }
-        let dir = if let Some(parent) = file.parent() {
-            parent.to_string_lossy().to_string()
-        } else {
-            ".".to_string()
-        };
-        dirs.entry(dir).or_default().push(
-            file.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| file_str.clone()),
-        );
-    }
-
-    let mut sorted_dirs: Vec<_> = dirs.into_iter().collect();
-    sorted_dirs.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (dir, mut files) in sorted_dirs {
-        files.sort();
-        let dir_display = if dir.is_empty() || dir == "." {
-            "."
-        } else {
-            &dir
-        };
-        message.push_str(&format!("\n  {}/ ({} files)\n", dir_display, files.len()));
-        for file in files.iter().take(5) {
-            message.push_str(&format!("    - {}\n", file));
-        }
-        if files.len() > 5 {
-            message.push_str(&format!("    ... and {} more\n", files.len() - 5));
-        }
-    }
-
-    // Calculate directory listing size
-    let dir_list_size: usize = relevant
-        .files
-        .iter()
-        .map(|p| p.to_string_lossy().len() + 1) // +1 for newline
-        .sum();
-    message.push_str(&format!(
-        "\n  Directory listing size: {} bytes\n",
-        dir_list_size
-    ));
-
-    // Show tracked files info
-    message.push_str("\n\nTRACKED FILES (full content sent):\n");
-    message.push_str(&format!("  Total tracked: {}\n", state.tracked_files.len()));
-
-    let mut total_tracked_size = 0;
-    let mut tracked_info = Vec::new();
-
-    for file_path in &state.tracked_files {
-        let path_str = file_path.to_string_lossy();
-        match file_manager.read_file(&path_str).await {
-            Ok(content) => {
-                let size = content.len();
-                total_tracked_size += size;
-                tracked_info.push((path_str.to_string(), size));
-            }
-            Err(e) => {
-                tracked_info.push((format!("{} (ERROR: {:?})", path_str, e), 0));
-            }
-        }
-    }
-
-    // Sort by size descending
-    tracked_info.sort_by(|a, b| b.1.cmp(&a.1));
-
-    for (path, size) in tracked_info {
-        message.push_str(&format!("    - {} ({} bytes)\n", path, size));
-    }
-
-    message.push_str(&format!(
-        "\n  Total tracked files size: {} bytes\n",
-        total_tracked_size
-    ));
-
-    // Show totals
-    message.push_str("\n\nTOTAL CONTEXT SIZE:\n");
-    let total_size = dir_list_size + total_tracked_size;
-    message.push_str(&format!(
-        "  {} bytes ({:.2} KB)\n",
-        total_size,
-        total_size as f64 / 1024.0
-    ));
-
-    if total_size > 100_000 {
-        message.push_str("\n  ⚠️ WARNING: Context is very large (>100KB). Consider:\n");
-        message.push_str("     - Clearing tracked files with /clear\n");
-        message.push_str("     - Adding more patterns to .gitignore\n");
-        message.push_str("     - Working in a subdirectory\n");
-    }
-
-    vec![create_message(message, MessageSender::System)]
+    let tracked_files: Vec<_> = state.tracked_files.iter().cloned().collect();
+    let context = build_message_context(&state.workspace_roots, &tracked_files).await;
+    vec![create_message(
+        context.to_formatted_string(),
+        MessageSender::System,
+    )]
 }
 
 async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
@@ -437,18 +338,14 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     // Set for all agents
     let agent_names: Vec<String> = AgentCatalog::get_agent_names();
     for agent_name in agent_names {
-        state
+        let result = state
             .settings
-            .settings_mut()
-            .set_agent_model(agent_name, settings.clone());
-    }
-
-    // Save
-    if let Err(e) = state.settings.save() {
-        return vec![create_message(
-            format!("Failed to save settings: {}", e),
-            MessageSender::System,
-        )];
+            .update_setting(|s| s.set_agent_model(agent_name, settings.clone()));
+        if let Err(e) = result {
+            return vec![ChatMessage::error(format!(
+                "Failed to save settings: {e:?}"
+            ))];
+        }
     }
 
     // Success message
@@ -512,13 +409,12 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
         Ok(s) => s,
         Err(e) => return vec![create_message(e, MessageSender::Error)],
     };
-    state
+    let result = state
         .settings
-        .settings_mut()
-        .set_agent_model(agent_name.to_string(), settings.clone());
-    if let Err(e) = state.settings.save() {
+        .update_setting(|s| s.set_agent_model(agent_name.to_string(), settings.clone()));
+    if let Err(e) = result {
         return vec![create_message(
-            format!("Failed to save settings: {}", e),
+            format!("Failed to save settings: {:?}", e),
             MessageSender::System,
         )];
     }
@@ -655,6 +551,91 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
 
     vec![create_message(
         format!("Switched to agent: {}", agent_name),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_review_level_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        // Show current review level
+        let current_level = &state.settings.settings().review_level;
+        return vec![create_message(
+            format!("Current review level: {:?}", current_level),
+            MessageSender::System,
+        )];
+    }
+
+    // Parse the review level from the command
+    let level_str = parts[1].to_lowercase();
+    let new_level = match level_str.as_str() {
+        "none" => ReviewLevel::None,
+        "modification" => ReviewLevel::Modification,
+        "all" => ReviewLevel::All,
+        _ => {
+            return vec![create_message(
+                "Invalid review level. Valid options: none, modification, all".to_string(),
+                MessageSender::Error,
+            )]
+        }
+    };
+
+    // Update the setting
+    let result = state
+        .settings
+        .update_setting(|s| s.review_level = new_level.clone());
+
+    // Save the settings
+    if let Err(e) = result {
+        return vec![create_message(
+            format!("Failed to save settings: {}", e),
+            MessageSender::Error,
+        )];
+    }
+
+    vec![create_message(
+        format!("Review level set to: {:?}", new_level),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        let settings = state.settings.settings();
+        let providers = settings.list_providers();
+        let current_provider = state.provider.name();
+
+        let mut message = String::new();
+        message.push_str("Available providers:\n\n");
+
+        for provider in providers {
+            if provider == current_provider {
+                message.push_str(&format!("  {} (active)\n", provider));
+            } else {
+                message.push_str(&format!("  {}\n", provider));
+            }
+        }
+
+        return vec![create_message(message, MessageSender::System)];
+    }
+
+    let provider_name = parts[1];
+
+    // Create new provider instance
+    let new_provider = match create_provider(&state.settings, provider_name).await {
+        Ok(provider) => provider,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to create provider '{}': {}", provider_name, e),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    // Update the active provider in memory
+    state.provider = new_provider;
+
+    vec![create_message(
+        format!("Active provider changed to: {}", provider_name),
         MessageSender::System,
     )]
 }

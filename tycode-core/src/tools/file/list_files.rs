@@ -1,5 +1,5 @@
+use crate::file::access::FileAccessManager;
 use crate::security::types::RiskLevel;
-use crate::tools::file_access::FileAccessManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -49,7 +49,10 @@ impl ToolExecutor for ListFilesTool {
     }
 
     async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
-        let directory_path = request.arguments.get("directory_path").and_then(|v| v.as_str());
+        let directory_path = request
+            .arguments
+            .get("directory_path")
+            .and_then(|v| v.as_str());
 
         let mut all_entries = Vec::new();
         let display_path;
@@ -60,23 +63,15 @@ impl ToolExecutor for ListFilesTool {
             display_path = dir_path.to_string();
 
             for path in paths {
-                let relative_path = self.workspace_roots.iter()
-                    .find_map(|root| {
-                        path.strip_prefix(root)
-                            .ok()
-                            .map(|rel| rel.to_string_lossy().to_string())
-                    })
-                    .unwrap_or_else(|| path.to_string_lossy().to_string());
-
                 let is_dir = self
                     .file_manager
-                    .list_directory(&relative_path)
+                    .list_directory(&path.to_string_lossy())
                     .await
                     .is_ok();
 
                 all_entries.push(json!({
                     "name": path.file_name().unwrap_or_default().to_string_lossy(),
-                    "path": relative_path,
+                    "path": path.to_string_lossy(),
                     "type": if is_dir { "directory" } else { "file" },
                 }));
             }
@@ -91,9 +86,10 @@ impl ToolExecutor for ListFilesTool {
             for root in &self.workspace_roots {
                 let root_str = root.to_string_lossy().to_string();
                 let paths = self.file_manager.list_directory(&root_str).await?;
-                
+
                 for path in paths {
-                    let relative_path = path.strip_prefix(root)
+                    let relative_path = path
+                        .strip_prefix(root)
                         .ok()
                         .map(|rel| rel.to_string_lossy().to_string())
                         .unwrap_or_else(|| path.to_string_lossy().to_string());

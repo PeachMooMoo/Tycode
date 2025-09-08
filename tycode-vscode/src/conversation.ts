@@ -1,16 +1,14 @@
 import { EventEmitter } from 'events';
-import { SubprocessBridge } from './subprocessBridge';
+import { ChatActorClient } from '../lib/client';
 import * as vscode from 'vscode';
 import { 
     ConversationMessage, 
-    ResponseEvent, 
-    ToolResultEvent,
-    BRIDGE_EVENTS,
+    ChatEvent,
     CONVERSATION_EVENTS 
 } from './events';
 
 export class Conversation extends EventEmitter {
-    public bridge: SubprocessBridge;
+    public client: ChatActorClient;
     private _id: string;
     private _title: string;
     private _messages: ConversationMessage[] = [];
@@ -18,6 +16,8 @@ export class Conversation extends EventEmitter {
     private _isManuallyNamed: boolean = false;
     private _hasFirstMessage: boolean = false;
     private _selectedProvider: string | undefined;
+    private eventConsumer: Promise<void> | null = null;
+    private shouldStop: boolean = false;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -30,7 +30,16 @@ export class Conversation extends EventEmitter {
         this._title = title || 'New Chat';
         this._isManuallyNamed = !!title;
         this._selectedProvider = selectedProvider;
-        this.bridge = new SubprocessBridge(context);
+        
+        // Get workspace roots for the client
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        const workspaceRoots = workspaceFolders ? workspaceFolders.map(f => f.uri.fsPath) : [];
+        
+        console.log('[Conversation] Creating ChatActorClient with workspaceRoots:', workspaceRoots);
+        console.log('[Conversation] Using default settings path (~/.tycode/settings.toml)');
+        
+        // Use default settings path (~/.tycode/settings.toml)
+        this.client = new ChatActorClient(workspaceRoots);
     }
 
     get id(): string {
@@ -67,75 +76,112 @@ export class Conversation extends EventEmitter {
     }
 
     async initialize(): Promise<void> {
-        await this.bridge.initialize();
         this._isActive = true;
 
-        // Don't send provider change on init - let subprocess use its settings
-        
-        // Set up event listeners with proper typing
-        this.bridge.on(BRIDGE_EVENTS.RESPONSE, (response: ResponseEvent) => {
-            console.log('[Conversation] Received response event');
-            const message: ConversationMessage = {
-                role: 'assistant',
-                content: response.content,
-                reasoning: response.reasoning,
-                toolCalls: response.tool_calls || [],
-                model: response.model,
-                isComplete: response.is_complete,
-                tokenUsage: response.token_usage
-            };
-            this._messages.push(message);
-            this.emit(CONVERSATION_EVENTS.RESPONSE, message);
-        });
+        // Start consuming events from the client
+        this.startEventConsumption();
+    }
 
-        this.bridge.on(BRIDGE_EVENTS.EVENT, (event: string, data: any) => {
-            console.log('[Conversation] Received event:', event, data);
-            if (event === 'system') {
+    private startEventConsumption(): void {
+        this.shouldStop = false;
+        this.eventConsumer = this.consumeEvents();
+    }
+
+    private async consumeEvents(): Promise<void> {
+        try {
+            for await (const event of this.client.events()) {
+                if (this.shouldStop) {
+                    break;
+                }
+                
+                console.log('[Conversation] Received event:', event);
+                await this.handleEvent(event);
+            }
+        } catch (error) {
+            console.error('[Conversation] Event consumption error:', error);
+            if (!this.shouldStop) {
                 const message: ConversationMessage = {
-                    role: 'system',
-                    content: data.content
+                    role: 'error',
+                    content: `Event consumption error: ${error}`
                 };
                 this._messages.push(message);
-                this.emit(CONVERSATION_EVENTS.SYSTEM, message);
-            } else if (event === 'typing_status') {
-                // Forward typing status without adding to messages
-                this.emit(CONVERSATION_EVENTS.TYPING_STATUS, data);
-            } else if (event === 'retry_attempt') {
-                // Forward retry attempt event properly
-                this.emit(CONVERSATION_EVENTS.RETRY_ATTEMPT, data);
+                this.emit(CONVERSATION_EVENTS.ERROR, message);
             }
-        });
+        }
+    }
 
-        this.bridge.on(BRIDGE_EVENTS.ERROR, (error: string) => {
-            console.log('[Conversation] Received error:', error);
-            const message: ConversationMessage = {
-                role: 'error',
-                content: error
-            };
-            this._messages.push(message);
-            this.emit(CONVERSATION_EVENTS.ERROR, message);
-        });
-
-        this.bridge.on(BRIDGE_EVENTS.TOOL_RESULT, (result: ToolResultEvent) => {
-            console.log('[Conversation] Received toolResult:', result);
-            const message: ConversationMessage = {
-                role: 'tool-result',
-                content: JSON.stringify(result),
-                toolName: result.tool_name,
-                success: result.success,
-                result: result.result,
-                error: result.error
-            };
-            this._messages.push(message);
-            // IMPORTANT: Pass the original result, not the message
-            this.emit(CONVERSATION_EVENTS.TOOL_RESULT, result);
-        });
-
-        this.bridge.on(BRIDGE_EVENTS.DISCONNECTED, () => {
-            console.log('[Conversation] Bridge disconnected');
-            this._isActive = false;
-            this.emit(CONVERSATION_EVENTS.DISCONNECTED);
-        });
+    private async handleEvent(event: ChatEvent): Promise<void> {
+        // Handle string events first
+        if (event === 'ConversationCleared') {
+            this._messages = [];
+            this.emit(CONVERSATION_EVENTS.CLEARED);
+            return;
+        }
+        
+        // Handle object events
+        if (typeof event === 'object' && event !== null) {
+            if ('MessageAdded' in event) {
+                const responseMessage: ConversationMessage = {
+                    role: 'assistant',
+                    content: event.MessageAdded.content,
+                    reasoning: event.MessageAdded.reasoning?.text,
+                    toolCalls: event.MessageAdded.tool_calls || [],
+                    model: event.MessageAdded.model_info?.model,
+                    isComplete: true, // MessageAdded events are complete
+                    tokenUsage: event.MessageAdded.token_usage
+                };
+                this._messages.push(responseMessage);
+                this.emit(CONVERSATION_EVENTS.RESPONSE, responseMessage);
+            } else if ('Settings' in event) {
+                // Handle settings events - could emit a settings event if needed
+                console.log('[Conversation] Settings updated:', event.Settings);
+            } else if ('TypingStatusChanged' in event) {
+                this.emit(CONVERSATION_EVENTS.TYPING_STATUS, {
+                    is_typing: event.TypingStatusChanged
+                });
+            } else if ('ToolExecutionCompleted' in event) {
+                const toolMessage: ConversationMessage = {
+                    role: 'tool-result',
+                    content: JSON.stringify(event.ToolExecutionCompleted),
+                    toolName: event.ToolExecutionCompleted.tool_name,
+                    success: event.ToolExecutionCompleted.success,
+                    result: event.ToolExecutionCompleted.result,
+                    error: event.ToolExecutionCompleted.error
+                };
+                this._messages.push(toolMessage);
+                this.emit(CONVERSATION_EVENTS.TOOL_RESULT, {
+                    tool_name: event.ToolExecutionCompleted.tool_name,
+                    success: event.ToolExecutionCompleted.success,
+                    result: event.ToolExecutionCompleted.result,
+                    error: event.ToolExecutionCompleted.error
+                });
+            } else if ('OperationCancelled' in event) {
+                const systemMessage: ConversationMessage = {
+                    role: 'system',
+                    content: `Operation cancelled: ${event.OperationCancelled.message}`
+                };
+                this._messages.push(systemMessage);
+                this.emit(CONVERSATION_EVENTS.SYSTEM, systemMessage);
+            } else if ('RetryAttempt' in event) {
+                this.emit(CONVERSATION_EVENTS.RETRY_ATTEMPT, {
+                    attempt: event.RetryAttempt.attempt,
+                    max_retries: event.RetryAttempt.max_retries,
+                    error: event.RetryAttempt.error,
+                    backoff_ms: event.RetryAttempt.backoff_ms
+                });
+            } else if ('Error' in event) {
+                const errorMessage: ConversationMessage = {
+                    role: 'error',
+                    content: event.Error
+                };
+                this._messages.push(errorMessage);
+                this.emit(CONVERSATION_EVENTS.ERROR, errorMessage);
+            } else {
+                console.warn('[Conversation] Unknown object event:', event);
+            }
+        } else {
+            console.warn('[Conversation] Unknown event type:', event);
+        }
     }
 
     async sendMessage(content: string): Promise<void> {
@@ -163,7 +209,7 @@ export class Conversation extends EventEmitter {
         }
 
         // Send to subprocess with selected provider
-        await this.bridge.sendMessage(content);
+        await this.client.sendMessage(content);
     }
 
     async sendCancel(): Promise<void> {
@@ -171,8 +217,8 @@ export class Conversation extends EventEmitter {
             throw new Error('Conversation is not active');
         }
         
-        // Send cancel to subprocess
-        await this.bridge.sendCancel();
+        // Send cancel message to subprocess
+        await this.client.cancel();
     }
 
     private generateTitleFromMessage(message: string): string {
@@ -227,20 +273,26 @@ export class Conversation extends EventEmitter {
         this._selectedProvider = provider;
 
         // Send cancel first to stop any ongoing processing
-        await this.bridge.sendCancel();
+        await this.client.cancel();
         
         // Then send provider change message to the subprocess
-        await this.bridge.changeProvider(provider);
+        await this.client.changeProvider(provider);
 
         // Emit event
         this.emit(CONVERSATION_EVENTS.PROVIDER_SWITCHED, oldProvider, provider);
-
-        
     }
 
     dispose(): void {
         this._isActive = false;
-        this.bridge.dispose();
+        this.shouldStop = true;
+        
+        // Stop the event consumer
+        if (this.eventConsumer) {
+            this.eventConsumer.catch(() => {}); // Ignore errors during shutdown
+        }
+        
+        // Close the client
+        this.client.close();
         this.removeAllListeners();
     }
 }

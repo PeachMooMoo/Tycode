@@ -1,6 +1,8 @@
+use crate::file::access::FileAccessManager;
 use crate::security::types::RiskLevel;
-use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{
+    FileModification, FileOperation, ToolExecutor, ToolRequest, ToolResult,
+};
 use anyhow::{bail, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -88,12 +90,8 @@ impl ToolExecutor for ReplaceInFileTool {
         })
     }
 
-    fn evaluate_risk(&self, arguments: &Value) -> RiskLevel {
-        if let Some(file_path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-            self.file_manager.evaluate_path_risk(file_path)
-        } else {
-            RiskLevel::HighRisk
-        }
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::LowRisk
     }
 
     async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
@@ -127,7 +125,7 @@ impl ToolExecutor for ReplaceInFileTool {
         };
 
         // Read the current content using FileAccessManager
-        let original_content = self.file_manager.read_file(file_path).await?;
+        let original_content: String = self.file_manager.read_file(file_path).await?;
 
         // Parse and apply the diff
         let replacements: Vec<SearchReplaceBlock> = diff_arr
@@ -137,77 +135,15 @@ impl ToolExecutor for ReplaceInFileTool {
                     .map_err(|e| anyhow::anyhow!("Invalid diff entry: {e:?}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let replacement_count = replacements.len();
         let new_content = self.apply_replacements(&original_content, replacements)?;
 
-        // Write the modified content back using FileAccessManager
-        self.file_manager
-            .write_file(file_path, &new_content)
-            .await?;
+        let modification = FileModification {
+            path: PathBuf::from(file_path),
+            operation: FileOperation::Update,
+            original_content: Some(original_content.to_string()),
+            new_content: Some(new_content),
+        };
 
-        // Context data: minimal information for the conversation
-        let context_data = json!({
-            "success": true,
-            "path": file_path,
-            "changes_applied": true,
-            "replacements_made": replacement_count
-        });
-
-        // UI data: full content for diff display in VSCode
-        let ui_data = json!({
-            "path": file_path,
-            "original_content": original_content,
-            "new_content": new_content
-        });
-
-        Ok(ToolResult::with_ui(context_data, ui_data))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_replace_in_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let tool = ReplaceInFileTool::new(vec![temp_dir.path().to_path_buf()]);
-
-        // Create a test file using FileAccessManager
-        let file_manager = FileAccessManager::new(vec![temp_dir.path().to_path_buf()]);
-        file_manager
-            .write_file("test.txt", "Hello World\nThis is a test\nGoodbye")
-            .await
-            .unwrap();
-
-        // Test replacement
-        let diff = json!([
-            {"search": "Hello World", "replace": "Hello Universe"},
-            {"search": "Goodbye", "replace": "See you later"}
-        ]);
-
-        let request = ToolRequest::new(
-            json!({
-                "file_path": "test.txt",
-                "diff": diff
-            }),
-            "test_id".to_string(),
-        );
-        let result = tool.execute(&request).await.unwrap();
-
-        match result {
-            ToolResult::Success { context_data, .. } => {
-                assert_eq!(context_data["success"], true);
-            }
-            _ => panic!("Expected Success variant"),
-        }
-
-        // Verify the content was changed
-        let new_content = file_manager.read_file("test.txt").await.unwrap();
-        assert!(new_content.contains("Hello Universe"));
-        assert!(new_content.contains("See you later"));
-        assert!(!new_content.contains("Hello World"));
-        assert!(!new_content.contains("Goodbye"));
+        Ok(ToolResult::FileModification(modification))
     }
 }

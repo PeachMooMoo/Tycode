@@ -4,6 +4,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReviewLevel {
+    None,
+    Modification,
+    All,
+}
+
+impl Default for ReviewLevel {
+    fn default() -> Self {
+        ReviewLevel::None
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// The name of the currently active provider
     #[serde(default = "default_active_provider")]
@@ -20,6 +33,10 @@ pub struct Settings {
     /// Agent-specific model overrides
     #[serde(default)]
     pub agent_models: HashMap<String, ModelSettings>,
+
+    /// Review level for messages
+    #[serde(default)]
+    pub review_level: ReviewLevel,
 }
 
 fn default_active_provider() -> String {
@@ -85,6 +102,7 @@ impl Default for Settings {
             providers,
             security: SecurityConfig::default(),
             agent_models: HashMap::new(),
+            review_level: ReviewLevel::None,
         }
     }
 }

@@ -4,7 +4,7 @@ import { Conversation } from './conversation';
 import * as path from 'path';
 import { 
     ConversationMessage, 
-    ToolResultEvent, 
+    ChatEvent,
     MANAGER_EVENTS 
 } from './events';
 
@@ -50,12 +50,12 @@ export class MainProvider implements vscode.WebviewViewProvider {
             // Tool results need special processing to extract diff data for file
             // modifications. This is different from other message types which are
             // passed through directly. The data parameter here is the raw 
-            // ToolResultEvent from the subprocess, NOT a ConversationMessage.
+            // ChatEvent from the subprocess, NOT a ConversationMessage.
             if (updateType === 'toolResult') {
                 console.log('[MainProvider] Processing toolResult:', id, data);
                 
-                // Cast to proper type - this is a ToolResultEvent, not a ConversationMessage
-                const toolResult = data as ToolResultEvent;
+                // Cast to proper type - this is a ChatEvent with tool_result type
+                const toolResult = data as any; // TODO: Update when tool result structure is finalized
                 
                 // Check if this is a file modification with diff data
                 let diffId: string | undefined;
@@ -242,22 +242,16 @@ export class MainProvider implements vscode.WebviewViewProvider {
             activeConversationId: activeConversation?.id || null
         });
 
-        // On initial load, just get cached settings without reloading from disk
+        // On initial load, get provider info from each conversation
         for (const c of conversations) {
-            if (c.bridge) {
-                const settings = c.bridge.getSettings();
-                if (settings) {
-                    const providers = Object.keys(settings.providers || {});
-                    const selectedProvider = settings.active_provider;
-                    
-                    this.sendToWebview({
-                        type: 'providerConfig',
-                        conversationId: c.id,
-                        providers,
-                        selectedProvider
-                    });
-                }
-            }
+            // Note: Settings will be handled through events in the new system
+            // We'll send provider config when settings events are received
+            this.sendToWebview({
+                type: 'providerConfig',
+                conversationId: c.id,
+                providers: [],
+                selectedProvider: null
+            });
         }
     }
 
@@ -360,24 +354,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
     private handleGetCachedProviders(conversationId: string): void {
         const conversation = this.conversationManager.getConversation(conversationId);
         
-        // Just get cached settings, no reload
-        if (conversation && conversation.bridge) {
-            const settings = conversation.bridge.getSettings();
-            if (settings) {
-                const providers = Object.keys(settings.providers || {});
-                const selectedProvider = settings.active_provider;
-                
-                this.sendToWebview({
-                    type: 'providerConfig',
-                    conversationId,
-                    providers,
-                    selectedProvider
-                });
-                return;
-            }
-        }
-        
-        // No settings available yet - send empty response
+        // Note: Settings handling needs to be updated for new client architecture
+        // For now, send empty response until settings integration is complete
         this.sendToWebview({
             type: 'providerConfig',
             conversationId,
@@ -389,31 +367,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
     private async handleRefreshProviders(conversationId: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         
-        if (conversation && conversation.bridge) {
-            try {
-                // Force reload settings from disk to get the latest
-                await conversation.bridge.reloadSettings();
-                
-                // Now get the fresh settings from cache
-                const settings = conversation.bridge.getSettings();
-                if (settings) {
-                    const providers = Object.keys(settings.providers || {});
-                    const selectedProvider = settings.active_provider;
-                    
-                    this.sendToWebview({
-                        type: 'providerConfig',
-                        conversationId,
-                        providers,
-                        selectedProvider
-                    });
-                    return;
-                }
-            } catch (error) {
-                console.error('[MainProvider] Failed to reload providers:', error);
-            }
-        }
-        
-        // No settings available yet or error occurred - send empty response
+        // Note: Settings refresh needs to be updated for new client architecture
+        // For now, send empty response until settings integration is complete
         this.sendToWebview({
             type: 'providerConfig',
             conversationId,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Development helper script for TyCode
+# Simplified build script for TyCode VSCode Extension
 
 set -e
 
@@ -10,12 +10,163 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}TyCode Development Helper${NC}"
-echo "========================="
+echo -e "${GREEN}TyCode VSCode Extension Builder${NC}"
+echo "==================================="
 echo ""
 
+# Function to detect platform and architecture
+detect_platform() {
+    local platform=$(uname -s)
+    local arch=$(uname -m)
+    
+    case "$platform" in
+        "Darwin")
+            if [ "$arch" = "arm64" ]; then
+                echo "darwin-arm64"
+            else
+                echo "darwin-x64"
+            fi
+            ;;
+        "Linux")
+            echo "linux-x64"
+            ;;
+        *)
+            echo "unsupported"
+            ;;
+    esac
+}
+
+# Function to get binary name with extension
+get_binary_name() {
+    local platform=$1
+    if [[ $platform == *"win32"* ]]; then
+        echo "tycode-subprocess.exe"
+    else
+        echo "tycode-subprocess"
+    fi
+}
+
+# Main build function
+build_extension() {
+    local build_mode=$1  # "debug" or "release"
+    
+    echo -e "${YELLOW}Starting ${build_mode} build...${NC}"
+    
+    # Step 1: Clean old binaries
+    echo -e "${YELLOW}1. Cleaning old binaries...${NC}"
+    rm -rf tycode-client-typescript/bin
+    
+    # Step 2: Build tycode-subprocess binary
+    echo -e "${YELLOW}2. Building tycode-subprocess binary (${build_mode} mode)...${NC}"
+    cd tycode-subprocess
+    if [ "$build_mode" = "release" ]; then
+        cargo build --release
+        SOURCE_PATH="target/release/tycode-subprocess"
+    else
+        cargo build
+        SOURCE_PATH="target/debug/tycode-subprocess"
+    fi
+    cd ..
+    
+    # Step 3: Copy binary to client library
+    echo -e "${YELLOW}3. Copying binary to client library...${NC}"
+    PLATFORM=$(detect_platform)
+    BINARY_NAME=$(get_binary_name $PLATFORM)
+    
+    if [ "$PLATFORM" = "unsupported" ]; then
+        echo -e "${RED}Unsupported platform: $(uname -s) $(uname -m)${NC}"
+        exit 1
+    fi
+    
+    mkdir -p "tycode-client-typescript/bin/$PLATFORM"
+    cp "$SOURCE_PATH" "tycode-client-typescript/bin/$PLATFORM/$BINARY_NAME"
+    chmod +x "tycode-client-typescript/bin/$PLATFORM/$BINARY_NAME"
+    
+    echo -e "${GREEN}Binary copied to: tycode-client-typescript/bin/$PLATFORM/$BINARY_NAME${NC}"
+    
+    # Step 4: Install and build TypeScript client library
+    echo -e "${YELLOW}4. Building TypeScript client library...${NC}"
+    cd tycode-client-typescript
+    
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}   Installing client library dependencies...${NC}"
+        npm install
+    fi
+    
+    # Build the library
+    npm run build
+    cd ..
+    
+    # Step 5: Install and build VSCode extension
+    echo -e "${YELLOW}5. Building VSCode extension...${NC}"
+    cd tycode-vscode
+    
+    # Install dependencies if node_modules doesn't exist
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}   Installing VSCode extension dependencies...${NC}"
+        npm install
+    fi
+    
+    # Copy client library files into extension
+    echo -e "${YELLOW}   Copying client library into extension...${NC}"
+    rm -rf lib bin
+    mkdir -p lib bin
+    cp -r ../tycode-client-typescript/lib/* lib/
+    cp -r ../tycode-client-typescript/bin/* bin/
+    
+    # Build the extension
+    npm run compile
+    
+    # Copy webview assets
+    echo -e "${YELLOW}   Copying webview assets...${NC}"
+    mkdir -p out/webview
+    cp src/webview/*.css out/webview/ 2>/dev/null || true
+    cp src/webview/*.js out/webview/ 2>/dev/null || true
+    
+    cd ..
+    
+    echo -e "${GREEN}Build complete! (${build_mode} mode)${NC}"
+    echo -e "${YELLOW}Binary location: tycode-client-typescript/bin/$PLATFORM/$BINARY_NAME${NC}"
+    echo -e "${YELLOW}VSCode extension built in: tycode-vscode/out/${NC}"
+}
+
 case "$1" in
-    setup)
+    "")
+        # Default: debug build for fast development
+        build_extension "debug"
+        ;;
+        
+    "release")
+        build_extension "release"
+        ;;
+        
+    "clean")
+        echo -e "${YELLOW}Cleaning all build artifacts...${NC}"
+        
+        # Clean Rust build
+        cd tycode-subprocess
+        cargo clean
+        cd ..
+        
+        # Clean TypeScript client
+        cd tycode-client-typescript
+        rm -rf lib/
+        rm -rf bin/
+        rm -rf node_modules/
+        cd ..
+        
+        # Clean VSCode extension
+        cd tycode-vscode
+        rm -rf out/
+        rm -rf node_modules/
+        rm -f *.vsix
+        cd ..
+        
+        echo -e "${GREEN}Clean complete!${NC}"
+        ;;
+        
+    "setup")
         echo -e "${YELLOW}Setting up development environment...${NC}"
         
         # Check for Node.js
@@ -30,284 +181,75 @@ case "$1" in
             exit 1
         fi
         
-        # Install Node dependencies
-        echo -e "${YELLOW}Installing Node dependencies...${NC}"
+        # Install Node dependencies for client library
+        echo -e "${YELLOW}Installing TypeScript client dependencies...${NC}"
+        cd tycode-client-typescript
+        npm install
+        cd ..
+        
+        # Install Node dependencies for VSCode extension
+        echo -e "${YELLOW}Installing VSCode extension dependencies...${NC}"
         cd tycode-vscode
         npm install
         cd ..
         
-        echo -e "${GREEN}Setup complete!${NC}"
+        echo -e "${GREEN}Setup complete! Run './dev.sh' to build.${NC}"
         ;;
         
-    build)
-        echo -e "${YELLOW}Building extension with subprocess bridge...${NC}"
-        
-        # Build native Rust CLI
-        echo -e "${YELLOW}Building native Rust CLI...${NC}"
-        cargo build --release
-        
-        # Build TypeScript
-        echo -e "${YELLOW}Compiling TypeScript...${NC}"
-        cd tycode-vscode
-        npm run compile
-        
-        # Copy webview assets
-        echo -e "${YELLOW}Copying webview files...${NC}"
-        mkdir -p out/webview
-        cp src/webview/*.css out/webview/ 2>/dev/null || true
-        cp src/webview/*.js out/webview/ 2>/dev/null || true
-        
-        # Verify files were copied
-        if [ -f "out/webview/chat.css" ] && [ -f "out/webview/chat.js" ]; then
-            echo -e "${GREEN}Webview files copied successfully${NC}"
-        else
-            echo -e "${RED}Warning: Some webview files may not have been copied${NC}"
-        fi
-        
-        cd ..
-        
-        echo -e "${GREEN}Build complete!${NC}"
-        echo -e "${YELLOW}Note: The extension uses the native CLI at ./target/release/tycode${NC}"
-        ;;
-        
-    quick-build)
-        echo -e "${YELLOW}Quick building extension (debug mode)...${NC}"
-        
-        # Build native Rust CLI in debug mode
-        echo -e "${YELLOW}Building native Rust CLI (debug mode)...${NC}"
-        cargo build
-        
-        # Build TypeScript
-        echo -e "${YELLOW}Compiling TypeScript...${NC}"
-        cd tycode-vscode
-        npm run compile
-        
-        # Copy webview assets
-        echo -e "${YELLOW}Copying webview files...${NC}"
-        mkdir -p out/webview
-        cp src/webview/*.css out/webview/ 2>/dev/null || true
-        cp src/webview/*.js out/webview/ 2>/dev/null || true
-        
-        cd ..
-        
-        echo -e "${GREEN}Quick build complete!${NC}"
-        echo -e "${YELLOW}Note: The extension uses the native CLI at ./target/debug/tycode${NC}"
-        ;;
-        
-    watch)
-        echo -e "${YELLOW}Starting watch mode...${NC}"
-        
-        # First do a full build to ensure everything is copied
-        echo -e "${YELLOW}Doing initial build...${NC}"
-        cd tycode-vscode
-        npm run compile
-        mkdir -p out/webview
-        cp src/webview/*.css out/webview/ 2>/dev/null || true
-        cp src/webview/*.js out/webview/ 2>/dev/null || true
-        
-        echo -e "${GREEN}Initial build complete!${NC}"
-        echo -e "${YELLOW}Starting TypeScript watch mode...${NC}"
-        echo -e "${YELLOW}Note: You'll need to manually rebuild the Rust CLI if you change it${NC}"
-        npm run watch
-        ;;
-        
-    package)
+    "package")
         echo -e "${YELLOW}Creating VSIX package...${NC}"
         
-        # Create binaries directory structure
-        echo -e "${YELLOW}Creating binaries directory structure...${NC}"
+        # First do a release build
+        build_extension "release"
+        
+        # Then create the package
+        echo -e "${YELLOW}6. Creating VSIX package...${NC}"
         cd tycode-vscode
-        rm -rf binaries
-        mkdir -p binaries/{darwin-x64,darwin-arm64,linux-x64,win32-x64}
-        cd ..
-        
-        # Build native Rust CLI for current platform first
-        echo -e "${YELLOW}Building native Rust CLI (release mode)...${NC}"
-        cargo build --release
-        
-        # Detect current platform and copy binary
-        CURRENT_PLATFORM=$(uname -s)
-        CURRENT_ARCH=$(uname -m)
-        
-        if [ "$CURRENT_PLATFORM" = "Darwin" ]; then
-            if [ "$CURRENT_ARCH" = "arm64" ]; then
-                echo -e "${GREEN}Copying macOS ARM64 binary...${NC}"
-                cp target/release/tycode tycode-vscode/binaries/darwin-arm64/tycode
-                chmod +x tycode-vscode/binaries/darwin-arm64/tycode
-            else
-                echo -e "${GREEN}Copying macOS x64 binary...${NC}"
-                cp target/release/tycode tycode-vscode/binaries/darwin-x64/tycode
-                chmod +x tycode-vscode/binaries/darwin-x64/tycode
-            fi
-        elif [ "$CURRENT_PLATFORM" = "Linux" ]; then
-            echo -e "${GREEN}Copying Linux x64 binary...${NC}"
-            cp target/release/tycode tycode-vscode/binaries/linux-x64/tycode
-            chmod +x tycode-vscode/binaries/linux-x64/tycode
-        fi
-        
-        # Try to build for other platforms if cross is installed
-        if command -v cross &> /dev/null; then
-            echo -e "${YELLOW}Cross compilation tool found, building for other platforms...${NC}"
-            
-            # Build for other platforms based on current platform
-            if [ "$CURRENT_PLATFORM" = "Darwin" ]; then
-                # On macOS, try to build universal binary
-                if [ "$CURRENT_ARCH" = "arm64" ]; then
-                    echo -e "${YELLOW}Building for macOS x64...${NC}"
-                    cargo build --release --target x86_64-apple-darwin 2>/dev/null && \
-                        cp target/x86_64-apple-darwin/release/tycode tycode-vscode/binaries/darwin-x64/tycode && \
-                        chmod +x tycode-vscode/binaries/darwin-x64/tycode || \
-                        echo -e "${YELLOW}Warning: Could not build for macOS x64${NC}"
-                else
-                    echo -e "${YELLOW}Building for macOS ARM64...${NC}"
-                    cargo build --release --target aarch64-apple-darwin 2>/dev/null && \
-                        cp target/aarch64-apple-darwin/release/tycode tycode-vscode/binaries/darwin-arm64/tycode && \
-                        chmod +x tycode-vscode/binaries/darwin-arm64/tycode || \
-                        echo -e "${YELLOW}Warning: Could not build for macOS ARM64${NC}"
-                fi
-                
-                # Try Linux cross-compilation
-                echo -e "${YELLOW}Building for Linux x64...${NC}"
-                cross build --release --target x86_64-unknown-linux-gnu 2>/dev/null && \
-                    cp target/x86_64-unknown-linux-gnu/release/tycode tycode-vscode/binaries/linux-x64/tycode && \
-                    chmod +x tycode-vscode/binaries/linux-x64/tycode || \
-                    echo -e "${YELLOW}Warning: Could not build for Linux x64${NC}"
-                    
-                # Try Windows cross-compilation
-                echo -e "${YELLOW}Building for Windows x64...${NC}"
-                cross build --release --target x86_64-pc-windows-gnu 2>/dev/null && \
-                    cp target/x86_64-pc-windows-gnu/release/tycode.exe tycode-vscode/binaries/win32-x64/tycode.exe || \
-                    echo -e "${YELLOW}Warning: Could not build for Windows x64${NC}"
-            fi
-        else
-            echo -e "${YELLOW}Note: Install 'cross' for cross-platform compilation${NC}"
-            echo -e "${YELLOW}  cargo install cross${NC}"
-        fi
-        
-        cd tycode-vscode
-        
-        echo -e "${YELLOW}Compiling TypeScript...${NC}"
-        npm run compile
-        
-        echo -e "${YELLOW}Copying webview files...${NC}"
-        mkdir -p out/webview
-        cp src/webview/*.css out/webview/ 2>/dev/null || true
-        cp src/webview/*.js out/webview/ 2>/dev/null || true
-        
-        # Show which binaries were included
-        echo -e "${GREEN}Binaries included in package:${NC}"
-        ls -la binaries/*/tycode* 2>/dev/null || echo -e "${YELLOW}No binaries found${NC}"
-        
-        echo -e "${YELLOW}Creating VSIX package...${NC}"
         npm run package
         
-        if [ -f *.vsix ]; then
+        if ls *.vsix 1> /dev/null 2>&1; then
             echo -e "${GREEN}Package created successfully!${NC}"
             ls -la *.vsix
         else
             echo -e "${RED}Failed to create package${NC}"
-        fi
-        
-        cd ..
-        ;;
-        
-    test)
-        echo -e "${YELLOW}Running all tests...${NC}"
-        
-        # Run Rust tests
-        echo -e "${YELLOW}Running Rust tests...${NC}"
-        cargo test
-        
-        # Run npm tests
-        echo -e "${YELLOW}Running VSCode extension tests...${NC}"
-        cd tycode-vscode
-        npm test
-        cd ..
-        
-        echo -e "${GREEN}All tests complete!${NC}"
-        ;;
-        
-    clean)
-        echo -e "${YELLOW}Cleaning build artifacts...${NC}"
-        
-        # Clean TypeScript/Node artifacts
-        cd tycode-vscode
-        rm -rf out/
-        rm -rf node_modules/
-        rm -f *.vsix
-        cd ..
-        
-        # Clean Rust build
-        cargo clean
-        
-        echo -e "${GREEN}Clean complete!${NC}"
-        ;;
-        
-    copy-webview)
-        echo -e "${YELLOW}Copying webview files...${NC}"
-        cd tycode-vscode
-        mkdir -p out/webview
-        cp src/webview/*.css out/webview/ 2>/dev/null || true
-        cp src/webview/*.js out/webview/ 2>/dev/null || true
-        
-        if [ -f "out/webview/chat.css" ] && [ -f "out/webview/chat.js" ]; then
-            echo -e "${GREEN}Webview files copied successfully${NC}"
-            ls -la out/webview/
-        else
-            echo -e "${RED}Failed to copy webview files${NC}"
-        fi
-        cd ..
-        ;;
-        
-    build-universal)
-        echo -e "${YELLOW}Building universal macOS binary...${NC}"
-        
-        if [ "$(uname -s)" != "Darwin" ]; then
-            echo -e "${RED}Universal binary can only be built on macOS${NC}"
             exit 1
         fi
         
-        # Build for both architectures
-        echo -e "${YELLOW}Building for x86_64...${NC}"
-        cargo build --release --target x86_64-apple-darwin
+        cd ..
+        ;;
         
-        echo -e "${YELLOW}Building for aarch64...${NC}"
-        cargo build --release --target aarch64-apple-darwin
+    "watch")
+        echo -e "${YELLOW}Starting watch mode...${NC}"
         
-        # Create universal binary
-        echo -e "${YELLOW}Creating universal binary...${NC}"
-        mkdir -p tycode-vscode/binaries/darwin-universal
-        lipo -create \
-            target/x86_64-apple-darwin/release/tycode \
-            target/aarch64-apple-darwin/release/tycode \
-            -output tycode-vscode/binaries/darwin-universal/tycode
+        # Do initial debug build
+        build_extension "debug"
         
-        chmod +x tycode-vscode/binaries/darwin-universal/tycode
+        echo -e "${GREEN}Initial build complete!${NC}"
+        echo -e "${YELLOW}Starting TypeScript watch mode...${NC}"
+        echo -e "${YELLOW}Note: Rebuild with './dev.sh' if you change Rust code${NC}"
         
-        echo -e "${GREEN}Universal binary created!${NC}"
-        file tycode-vscode/binaries/darwin-universal/tycode
+        # Start watch mode for VSCode extension
+        cd tycode-vscode
+        npm run watch
         ;;
         
     *)
-        echo "Usage: ./dev.sh {setup|build|quick-build|watch|package|test|clean|copy-webview|build-universal}"
+        echo "Usage: ./dev.sh [command]"
         echo ""
         echo "Commands:"
-        echo "  setup           - Install dependencies and set up development environment"
-        echo "  build           - Full build with native Rust CLI (release mode) and TypeScript"
-        echo "  quick-build     - Fast development build (debug mode)"
-        echo "  watch           - Start TypeScript watch mode for development"
-        echo "  package         - Create VSIX package for distribution"
-        echo "  test            - Run all tests (Rust and VSCode extension)"
-        echo "  clean           - Remove build artifacts"
-        echo "  copy-webview    - Copy webview HTML/CSS/JS files to output"
-        echo "  build-universal - Build universal macOS binary (macOS only)"
+        echo "  (none)    - Build extension (debug mode, fastest)"
+        echo "  release   - Build extension (release mode, optimized)"
+        echo "  setup     - Install dependencies"
+        echo "  watch     - Start TypeScript watch mode for development"
+        echo "  package   - Create VSIX package for distribution"
+        echo "  clean     - Remove all build artifacts"
         echo ""
-        echo "Notes:"
-        echo "  - The extension uses the native Rust CLI via subprocess bridge"
-        echo "  - CLI binary location: ./target/debug/tycode (debug) or ./target/release/tycode (release)"
-        echo "  - Use 'quick-build' for faster development iteration"
-        echo "  - Use 'build' for production releases"
-        echo "  - For cross-platform packaging, install: cargo install cross"
+        echo "Examples:"
+        echo "  ./dev.sh           # Quick debug build"
+        echo "  ./dev.sh release   # Optimized build"
+        echo "  ./dev.sh setup     # First time setup"
+        echo "  ./dev.sh watch     # Development with auto-rebuild"
+        echo "  ./dev.sh package   # Create installable VSIX"
         exit 1
         ;;
 esac

@@ -1,23 +1,19 @@
-use crate::security::types::RiskLevel;
-use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
-use anyhow::Result;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+
+use crate::{
+    file::access::FileAccessManager,
+    security::types::RiskLevel,
+    tools::r#trait::{ToolExecutor, ToolRequest, ToolResult},
+};
 
 #[derive(Clone)]
 pub struct SearchFilesTool {
-    workspace_roots: Vec<PathBuf>,
     file_manager: FileAccessManager,
 }
 
 impl SearchFilesTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots.clone());
-        Self {
-            workspace_roots,
-            file_manager,
-        }
+    pub fn new(file_manager: FileAccessManager) -> Self {
+        Self { file_manager }
     }
 }
 
@@ -68,81 +64,99 @@ impl ToolExecutor for SearchFilesTool {
         RiskLevel::ReadOnly
     }
 
-    async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
-        let directory_path = request.arguments
-            .get("directory_path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: directory_path"))?;
+    async fn execute(&self, request: &ToolRequest) -> anyhow::Result<ToolResult> {
+        todo!("fix once file API rework is stable")
+        // let directory_path = request
+        //     .arguments
+        //     .get("directory_path")
+        //     .and_then(|v| v.as_str())
+        //     .ok_or_else(|| anyhow::anyhow!("Missing required parameter: directory_path"))?;
 
-        let pattern = request.arguments
-            .get("pattern")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: pattern"))?;
+        // let pattern = request
+        //     .arguments
+        //     .get("pattern")
+        //     .and_then(|v| v.as_str())
+        //     .ok_or_else(|| anyhow::anyhow!("Missing required parameter: pattern"))?;
 
-        let file_pattern = request.arguments.get("file_pattern").and_then(|v| v.as_str());
-        
-        let max_results = request.arguments
-            .get("max_results")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(100);
-        
-        let include_context = request.arguments
-            .get("include_context")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        
-        let context_lines = request.arguments
-            .get("context_lines")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(2);
+        // let file_pattern = request
+        //     .arguments
+        //     .get("file_pattern")
+        //     .and_then(|v| v.as_str());
 
-        // Use FileAccessManager for secure file searching
-        let (results, truncated) = self
-            .file_manager
-            .search_files(directory_path, pattern, file_pattern, max_results, include_context, context_lines)
-            .await?;
+        // let max_results = request
+        //     .arguments
+        //     .get("max_results")
+        //     .and_then(|v| v.as_u64())
+        //     .map(|v| v as usize)
+        //     .unwrap_or(100);
 
-        let mut json_results = Vec::new();
-        for result in results {
-            // Find which workspace root this path belongs to
-            let relative_path = self.workspace_roots.iter()
-                .find_map(|root| {
-                    result.path
-                        .strip_prefix(root)
-                        .ok()
-                        .map(|rel| rel.to_string_lossy().to_string())
-                })
-                .unwrap_or_else(|| result.path.to_string_lossy().to_string());
+        // let include_context = request
+        //     .arguments
+        //     .get("include_context")
+        //     .and_then(|v| v.as_bool())
+        //     .unwrap_or(false);
 
-            let mut result_obj = json!({
-                "path": relative_path,
-                "line_number": result.line_number,
-                "line": result.line_content,
-            });
-            
-            // Only include context if present
-            if let Some(context_before) = result.context_before {
-                result_obj["context_before"] = json!(context_before);
-            }
-            if let Some(context_after) = result.context_after {
-                result_obj["context_after"] = json!(context_after);
-            }
+        // let context_lines = request
+        //     .arguments
+        //     .get("context_lines")
+        //     .and_then(|v| v.as_u64())
+        //     .map(|v| v as usize)
+        //     .unwrap_or(2);
 
-            json_results.push(result_obj);
-        }
+        // // Use FileAccessManager for secure file searching
+        // let (results, truncated) = search_files(
+        //     &self.file_manager,
+        //     directory_path,
+        //     pattern,
+        //     file_pattern,
+        //     max_results,
+        //     include_context,
+        //     context_lines,
+        // )
+        // .await?;
 
-        let mut response = json!({
-            "results": json_results,
-            "count": json_results.len(),
-        });
-        
-        if truncated {
-            response["truncated"] = json!(true);
-            response["message"] = json!("Results truncated to limit");
-        }
+        // let mut json_results = Vec::new();
+        // for result in results {
+        //     // Find which workspace root this path belongs to
+        //     let relative_path = self
+        //         .workspace_roots
+        //         .iter()
+        //         .find_map(|root| {
+        //             result
+        //                 .path
+        //                 .strip_prefix(root)
+        //                 .ok()
+        //                 .map(|rel| rel.to_string_lossy().to_string())
+        //         })
+        //         .unwrap_or_else(|| result.path.to_string_lossy().to_string());
 
-        Ok(ToolResult::context_only(response))
+        //     let mut result_obj = json!({
+        //         "path": relative_path,
+        //         "line_number": result.line_number,
+        //         "line": result.line_content,
+        //     });
+
+        //     // Only include context if present
+        //     if let Some(context_before) = result.context_before {
+        //         result_obj["context_before"] = json!(context_before);
+        //     }
+        //     if let Some(context_after) = result.context_after {
+        //         result_obj["context_after"] = json!(context_after);
+        //     }
+
+        //     json_results.push(result_obj);
+        // }
+
+        // let mut response = json!({
+        //     "results": json_results,
+        //     "count": json_results.len(),
+        // });
+
+        // if truncated {
+        //     response["truncated"] = json!(true);
+        //     response["message"] = json!("Results truncated to limit");
+        // }
+
+        // Ok(ToolResult::context_only(response))
     }
 }

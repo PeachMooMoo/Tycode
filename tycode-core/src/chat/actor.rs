@@ -260,7 +260,7 @@ async fn handle_provider_change(state: &mut ActorState, provider_name: String) -
 
 /// Initializes the provider with the given name if it exists in settings, else
 /// raises an error.
-async fn create_provider(
+pub async fn create_provider(
     settings: &SettingsManager,
     provider: &str,
 ) -> Result<Box<dyn AiProvider>> {

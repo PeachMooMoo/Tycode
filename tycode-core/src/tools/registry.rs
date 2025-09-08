@@ -1,6 +1,7 @@
 use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::chat::state::FileModificationApi;
+use crate::file::access::FileAccessManager;
 use crate::security::types::RiskLevel;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
@@ -12,7 +13,7 @@ use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use crate::tools::spawn_agent::SpawnAgent;
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
@@ -48,7 +49,9 @@ impl ToolRegistry {
         self.register_tool(Arc::new(ReadFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(WriteFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(ListFilesTool::new(workspace_roots.clone())));
-        self.register_tool(Arc::new(SearchFilesTool::new(workspace_roots.clone())));
+        self.register_tool(Arc::new(SearchFilesTool::new(FileAccessManager::new(
+            workspace_roots.clone(),
+        ))));
         self.register_tool(Arc::new(DeleteFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())));
 
@@ -167,7 +170,7 @@ impl ToolRegistry {
             Ok(result) => result,
             Err(e) => {
                 error!(?e, tool_name = %tool_use.name, "Tool execution failed");
-                crate::tools::r#trait::ToolResult::Error(format!("Error: {:?}", e))
+                ToolResult::Error(format!("Error: {e:?}"))
             }
         }
     }

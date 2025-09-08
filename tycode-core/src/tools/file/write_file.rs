@@ -1,6 +1,8 @@
+use crate::file::access::FileAccessManager;
 use crate::security::types::RiskLevel;
-use crate::tools::file_access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{
+    FileModification, FileOperation, ToolExecutor, ToolRequest, ToolResult,
+};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -44,16 +46,13 @@ impl ToolExecutor for WriteFileTool {
         })
     }
 
-    fn evaluate_risk(&self, arguments: &Value) -> RiskLevel {
-        if let Some(file_path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-            self.file_manager.evaluate_path_risk(file_path)
-        } else {
-            RiskLevel::HighRisk
-        }
+    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
+        RiskLevel::LowRisk
     }
 
     async fn execute(&self, request: &ToolRequest) -> Result<ToolResult> {
-        let file_path = request.arguments
+        let file_path = request
+            .arguments
             .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
@@ -64,28 +63,20 @@ impl ToolExecutor for WriteFileTool {
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;
 
         // Try to read original content if file exists
-        let original_content = self.file_manager.read_file(file_path).await.unwrap_or_default();
-        let file_exists = !original_content.is_empty();
+        let original_content = self.file_manager.read_file(file_path).await.ok();
+        let operation = if original_content.is_some() {
+            FileOperation::Update
+        } else {
+            FileOperation::Create
+        };
 
-        // Use FileAccessManager for secure file writing
-        self.file_manager.write_file(file_path, content).await?;
+        let modification = FileModification {
+            path: PathBuf::from(file_path),
+            operation,
+            original_content,
+            new_content: Some(content.to_string()),
+        };
 
-        // Context data: minimal information for the conversation
-        let context_data = json!({
-            "success": true,
-            "path": file_path,
-            "bytes_written": content.len(),
-            "created": !file_exists,
-            "updated": file_exists
-        });
-
-        // UI data: full content for diff display in VSCode
-        let ui_data = json!({
-            "path": file_path,
-            "original_content": original_content,
-            "new_content": content
-        });
-
-        Ok(ToolResult::with_ui(context_data, ui_data))
+        Ok(ToolResult::FileModification(modification))
     }
 }

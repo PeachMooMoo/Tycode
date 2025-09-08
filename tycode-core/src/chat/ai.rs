@@ -3,13 +3,14 @@ use crate::agents::catalog::AgentCatalog;
 use crate::agents::tool_type::ToolType;
 use crate::ai::{
     error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
-    ConversationResponse, Message, MessageContext, MessageRole, ModelSettings, ToolResultData,
-    ToolUseData,
+    ConversationResponse, Message, MessageRole, ModelSettings, ToolResultData, ToolUseData,
 };
-use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, FileInfo, ModelInfo};
+use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
+use crate::file::context::{build_message_context, create_context_info};
+use crate::file::manager::FileModificationManager;
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
-use crate::tools::context_utils::list_relevant_files;
-use crate::tools::file_access::FileAccessManager;
+
+use crate::file::access::FileAccessManager;
 use crate::tools::r#trait::ToolResult;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
@@ -81,7 +82,8 @@ async fn prepare_ai_request(
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
     // Build message context
-    let message_context = build_message_context(state).await;
+    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
+    let message_context = build_message_context(&state.workspace_roots, &tracked_files).await;
     let context_info = create_context_info(&message_context);
     let context_string = message_context.to_formatted_string();
     let context_text = format!("Current Context:\n{}", context_string);
@@ -118,28 +120,6 @@ async fn prepare_ai_request(
     info!(?request, "AI request");
 
     Ok((request, context_info, model_settings))
-}
-
-fn create_context_info(message_context: &MessageContext) -> ContextInfo {
-    let dir_list_size = message_context
-        .relevant_files
-        .iter()
-        .map(|p| p.to_string_lossy().len() + 1)
-        .sum::<usize>();
-
-    let files: Vec<FileInfo> = message_context
-        .tracked_file_contents
-        .iter()
-        .map(|(path, content)| FileInfo {
-            path: path.to_string_lossy().to_string(),
-            bytes: content.len(),
-        })
-        .collect();
-
-    ContextInfo {
-        directory_list_bytes: dir_list_size,
-        files,
-    }
 }
 
 fn process_ai_response(
@@ -227,6 +207,45 @@ async fn handle_tool_result(
         }
         ToolResult::Error(error) => {
             handle_tool_error(state, tool_use, error);
+            true
+        }
+        ToolResult::FileModification(modification) => {
+            // Handle file modification in ai.rs by calling FileModificationManager
+            let file_manager = FileAccessManager::new(state.workspace_roots.clone());
+            let file_modification_manager = FileModificationManager::new(
+                file_manager,
+                state.security_manager.get_config().clone(),
+            );
+
+            match file_modification_manager
+                .apply_modification(modification.clone())
+                .await
+            {
+                Ok(()) => {
+                    // Create success response with context and UI data
+                    let context_data = json!({
+                        "success": true,
+                        "path": modification.path,
+                        "operation": match modification.operation {
+                            crate::tools::r#trait::FileOperation::Create => "create",
+                            crate::tools::r#trait::FileOperation::Update => "update",
+                            crate::tools::r#trait::FileOperation::Delete => "delete",
+                        }
+                    });
+
+                    let ui_data = json!({
+                        "path": modification.path,
+                        "original_content": modification.original_content,
+                        "new_content": modification.new_content
+                    });
+
+                    handle_tool_success(state, tool_use, context_data, Some(ui_data));
+                }
+                Err(e) => {
+                    let error_msg = format!("File modification failed: {e:?}");
+                    handle_tool_error(state, tool_use, error_msg);
+                }
+            }
             true
         }
         ToolResult::PushAgent {
@@ -487,30 +506,6 @@ async fn handle_tool_pop_agent(
         .add_message(ChatMessage::system(result_message));
 
     Ok(true)
-}
-
-async fn build_message_context(state: &ActorState) -> MessageContext {
-    let mut context = MessageContext::new(state.workspace_roots.clone());
-
-    let relevant_files = list_relevant_files(&state.workspace_roots);
-    context.set_relevant_files(relevant_files.files);
-
-    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
-    let file_manager = FileAccessManager::new(state.workspace_roots.clone());
-
-    for file_path in tracked_files {
-        let path_str = file_path.to_string_lossy();
-        match file_manager.read_file(&path_str).await {
-            Ok(content) => {
-                context.add_tracked_file(file_path, content);
-            }
-            Err(e) => {
-                warn!(?e, "Failed to read tracked file: {:?}", file_path);
-            }
-        }
-    }
-
-    context
 }
 
 async fn send_request_with_retry(

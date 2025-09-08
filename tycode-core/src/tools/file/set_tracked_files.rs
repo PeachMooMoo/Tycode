@@ -1,5 +1,5 @@
 use crate::security::types::RiskLevel;
-use crate::tools::file_access::FileAccessManager;
+use crate::file::access::FileAccessManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
