@@ -16,6 +16,7 @@ pub enum ChatEvent {
     Settings(serde_json::Value),
     TypingStatusChanged(bool),
     ConversationCleared,
+    ToolRequest(ToolRequest),
     ToolExecutionCompleted {
         tool_name: String,
         success: bool,
@@ -134,15 +135,23 @@ pub enum MessageSender {
     Error,
 }
 
-impl MessageSender {
-    pub fn prefix(&self) -> &str {
-        match self {
-            MessageSender::User => "You",
-            MessageSender::Assistant { agent } => agent,
-            MessageSender::System => "System",
-            MessageSender::Error => "Error",
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolRequestType {
+    ModifyFile {
+        file_path: String,
+        before: String,
+        after: String,
+    },
+    Other {
+        args: serde_json::Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolRequest {
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub tool_type: ToolRequestType,
 }
 
 /// A small wrapper over the `event_tx` for convienance.

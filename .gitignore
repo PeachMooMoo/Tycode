@@ -4,6 +4,8 @@ Cargo.lock
 
 # Node/VSCode extension artifacts
 node_modules/
+tycode-vscode/bin/
+tycode-vscode/lib/
 tycode-vscode/out/
 tycode-vscode/wasm/
 tycode-vscode/binaries/

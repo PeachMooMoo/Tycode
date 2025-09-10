@@ -10,27 +10,16 @@ export type {
     MessageSender,
     ReasoningData,
     ToolUseData,
-    TokenUsage
+    TokenUsage,
+    ChatEventTag,
+    ToolRequest
 } from '../lib/types';
 
-// Message types for conversation (mapped from ChatMessage)
-export interface ConversationMessage {
-    role: 'user' | 'assistant' | 'system' | 'error' | 'tool-result';
-    content: string;
-    reasoning?: string;
-    toolCalls?: any[];
-    model?: string;
-    isComplete?: boolean;
-    tokenUsage?: {
-        input_tokens?: number;
-        output_tokens?: number;
-        total_tokens?: number;
-    };
-    toolName?: string;
-    success?: boolean;
-    result?: any;
-    error?: string;
-}
+export {
+  getChatEventTag
+} from '../lib/types';
+
+// ConversationMessage interface removed - using ChatMessage directly
 
 // Settings structure
 export interface Settings {
@@ -43,17 +32,18 @@ export interface Settings {
 
 // Event constants for conversation management
 export const CONVERSATION_EVENTS = {
-    RESPONSE: 'response',
-    USER_MESSAGE: 'userMessage',
-    SYSTEM: 'system',
+    MESSAGE_ADDED: 'messageAdded',
     ERROR: 'error',
-    TOOL_RESULT: 'toolResult',
+    TOOL_EXECUTION_COMPLETED: 'toolExecutionCompleted',
+    TOOL_REQUEST: 'toolRequest',
+    SETTINGS: 'settings',
+    TYPING_STATUS: 'typingStatus',
+    RETRY_ATTEMPT: 'retryAttempt',
+    OPERATION_CANCELLED: 'operationCancelled',
     TITLE_CHANGED: 'titleChanged',
     PROVIDER_CHANGED: 'providerChanged',
     PROVIDER_SWITCHED: 'providerSwitched',
     DISCONNECTED: 'disconnected',
-    TYPING_STATUS: 'typingStatus',
-    RETRY_ATTEMPT: 'retryAttempt',
     CLEARED: 'cleared'
 } as const;
 

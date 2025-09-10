@@ -46,7 +46,10 @@ impl Resolver {
         let virtual_path = PathBuf::from("/").join(&root).join(&relative);
 
         let Some(workspace) = self.workspaces.get(&root) else {
-            bail!("No workspace: {root} (known: {:?}", self.workspaces);
+            bail!(
+                "No root directory: {root} (known: {:?}). Be sure to use absolute paths!",
+                self.workspaces.keys()
+            );
         };
 
         let real_path = workspace.join(relative);

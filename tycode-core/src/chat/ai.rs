@@ -5,7 +5,9 @@ use crate::ai::{
     error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
     ConversationResponse, Message, MessageRole, ModelSettings, ToolResultData, ToolUseData,
 };
-use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
+use crate::chat::events::{
+    ChatEvent, ChatMessage, ContextInfo, ModelInfo, ToolRequest, ToolRequestType,
+};
 use crate::file::context::{build_message_context, create_context_info};
 use crate::file::manager::FileModificationManager;
 use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
@@ -238,6 +240,19 @@ async fn handle_tool_result(
                         "original_content": modification.original_content,
                         "new_content": modification.new_content
                     });
+
+                    state
+                        .event_sender
+                        .event_tx
+                        .send(ChatEvent::ToolRequest(ToolRequest {
+                            tool_name: tool_use.name.clone(),
+                            arguments: tool_use.arguments.clone(),
+                            tool_type: ToolRequestType::ModifyFile {
+                                file_path: modification.path.to_string_lossy().to_string(),
+                                before: modification.original_content.clone().unwrap_or_default(),
+                                after: modification.new_content.clone().unwrap_or_default(),
+                            },
+                        }))?;
 
                     handle_tool_success(state, tool_use, context_data, Some(ui_data));
                 }

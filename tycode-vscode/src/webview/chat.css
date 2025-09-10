@@ -389,6 +389,15 @@ body {
     transform: translateY(1px);
 }
 
+.tool-request-actions {
+    margin-top: 6px;
+    margin-left: 24px;
+}
+
+.tool-request-actions .view-diff-button {
+    display: inline-block;
+}
+
 .reasoning-header {
     font-weight: 600;
     margin-bottom: 4px;

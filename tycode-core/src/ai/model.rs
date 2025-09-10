@@ -13,6 +13,7 @@ pub enum Model {
     GptOss120b,
     GrokCodeFast1,
     Qwen3Coder,
+    Gemini25Flash,
 
     /// This allows code to match all models, but still match _ => to
     /// avoid being *required* to match all models.
@@ -29,6 +30,7 @@ impl Model {
             Self::GptOss120b => "gpt-oss-120b",
             Self::GrokCodeFast1 => "grok-code-fast-1",
             Self::Qwen3Coder => "qwen3-coder",
+            Self::Gemini25Flash => "gemini-2-5-flash",
             Self::None => "None",
         }
     }
@@ -42,6 +44,7 @@ impl Model {
             "gpt-oss-120b" => Some(Self::GptOss120b),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "qwen3-coder" => Some(Self::Qwen3Coder),
+            "gemini-2-5-flash" => Some(Self::Gemini25Flash),
             _ => None,
         }
     }
@@ -55,6 +58,7 @@ impl Model {
             Self::GptOss120b,
             Self::GrokCodeFast1,
             Self::Qwen3Coder,
+            Self::Gemini25Flash,
         ]
     }
 

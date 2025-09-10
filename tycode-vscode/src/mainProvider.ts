@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 import { ConversationManager } from './conversationManager';
 import { Conversation } from './conversation';
 import * as path from 'path';
-import { 
-    ConversationMessage, 
+import {
     ChatEvent,
-    MANAGER_EVENTS 
+    ToolRequest,
+    MANAGER_EVENTS,
+    getChatEventTag
 } from './events';
+import { ChatActorClient } from '../lib/client';
 
 // Import build info - will be generated at build time
 let buildInfo = { buildTime: 'dev', timestamp: new Date().toISOString() };
@@ -27,12 +29,83 @@ export class MainProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private conversationManager: ConversationManager;
     private _diffDataStore: Map<string, DiffData> = new Map();
+    private workspaceRoots = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+    private cachedProviders: string[] = [];
+    private cachedActiveProvider: string | null = null;
 
     constructor(
         private readonly context: vscode.ExtensionContext
     ) {
         this.conversationManager = new ConversationManager(context);
         this.setupConversationListeners();
+        // Load initial provider configuration
+        this.loadProvidersFromSettings();
+    }
+
+    private async loadProvidersFromSettings() {
+        try {
+            const client = new ChatActorClient(this.workspaceRoots);
+
+            // Load settings with timeout
+            const settingsPromise = new Promise<any>((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Settings loading timeout'));
+                }, 10000);
+
+                this.consumeSettingsEvents(client, resolve, reject, timeout);
+            });
+
+            await client.getSettings();
+            const settings = await settingsPromise;
+
+            this.cachedProviders = Object.keys(settings.providers || {});
+            this.cachedActiveProvider = settings.active_provider || (this.cachedProviders.length > 0 ? this.cachedProviders[0] : null);
+
+            client.close();
+            return { providers: this.cachedProviders, activeProvider: this.cachedActiveProvider };
+        } catch (error) {
+            console.error('[MainProvider] Error loading settings:', error);
+            // Fallback to default provider
+            this.cachedProviders = ['default'];
+            this.cachedActiveProvider = 'default';
+            return { providers: this.cachedProviders, activeProvider: this.cachedActiveProvider };
+        }
+    }
+
+    private async consumeSettingsEvents(client: ChatActorClient, resolve: (value: any) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout): Promise<void> {
+        try {
+            for await (const event of client.events()) {
+                const tag = getChatEventTag(event);
+                switch (tag) {
+                    case 'Settings':
+                        clearTimeout(timeout);
+                        resolve((event as { Settings: any }).Settings);
+                        return;
+                    case 'Error':
+                        clearTimeout(timeout);
+                        reject(new Error((event as { Error: string }).Error));
+                        return;
+                    case 'ConversationCleared':
+                    case 'MessageAdded':
+                    case 'TypingStatusChanged':
+                    case 'ToolExecutionCompleted':
+                    case 'OperationCancelled':
+                    case 'RetryAttempt':
+                    case 'ToolRequest':
+                        // Ignore these events during settings loading
+                        break;
+                    default:
+                        // exhaustiveness check
+                        const _exhaustive: never = tag;
+                        clearTimeout(timeout);
+                        reject(new Error(`Unexpected ChatEvent: ${JSON.stringify(event)}`));
+                        return _exhaustive;
+                }
+            }
+        } catch (error) {
+            clearTimeout(timeout);
+            reject(error as Error);
+        }
     }
 
     private setupConversationListeners(): void {
@@ -42,89 +115,128 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 id: conversation.id,
                 title: conversation.title
             });
-            
-            });
+
+        });
 
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_UPDATE, (id: string, updateType: string, data: any) => {
-            // IMPORTANT: Special handling for toolResult events!
-            // Tool results need special processing to extract diff data for file
-            // modifications. This is different from other message types which are
-            // passed through directly. The data parameter here is the raw 
-            // ChatEvent from the subprocess, NOT a ConversationMessage.
-            if (updateType === 'toolResult') {
-                console.log('[MainProvider] Processing toolResult:', id, data);
-                
-                // Cast to proper type - this is a ChatEvent with tool_result type
-                const toolResult = data as any; // TODO: Update when tool result structure is finalized
-                
-                // Check if this is a file modification with diff data
+            // Handle tool request events
+            if (updateType === 'toolRequest') {
+                console.log('[MainProvider] Processing toolRequest:', id, data);
+
+                const toolRequestEvent = data as ChatEvent;
+                const toolRequest = (toolRequestEvent as { ToolRequest: ToolRequest }).ToolRequest;
                 let diffId: string | undefined;
-                if (toolResult.success && toolResult.result) {
-                    const toolName = toolResult.tool_name;
-                    if ((toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') &&
-                        toolResult.result.original_content !== undefined &&
-                        toolResult.result.new_content !== undefined) {
-                        
-                        // Generate unique ID for this diff and store it
-                        diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                        console.log('[MainProvider] Storing diff with ID:', diffId);
-                        this._diffDataStore.set(diffId, {
-                            filePath: toolResult.result.path,
-                            originalContent: toolResult.result.original_content,
-                            newContent: toolResult.result.new_content
-                        });
-                    }
+
+                // Check if this is a ModifyFile tool request with diff data
+                if (toolRequest.tool_type && 'ModifyFile' in toolRequest.tool_type) {
+                    const modifyFile = toolRequest.tool_type.ModifyFile;
+
+                    // Generate unique ID for this diff and store it
+                    diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    console.log('[MainProvider] Storing diff from ToolRequest with ID:', diffId);
+                    this._diffDataStore.set(diffId, {
+                        filePath: modifyFile.file_path,
+                        originalContent: modifyFile.before,
+                        newContent: modifyFile.after
+                    });
                 }
-                
-                // Send tool result to webview with optional diffId
+
+                // Send tool request to webview for display
+                console.log("Sending toolRequest with diffId ", diffId);
+                this.sendToWebview({
+                    type: 'toolRequest',
+                    conversationId: id,
+                    toolName: toolRequest.tool_name,
+                    arguments: toolRequest.arguments,
+                    toolType: toolRequest.tool_type,
+                    diffId: diffId
+                });
+                return;
+            }
+
+            // Handle tool execution completed events
+            if (updateType === 'toolExecutionCompleted') {
+                console.log('[MainProvider] Processing toolExecutionCompleted:', id, data);
+
+                const toolCompletedEvent = data as ChatEvent;
+                const toolResult = (toolCompletedEvent as { ToolExecutionCompleted: any }).ToolExecutionCompleted;
+
+                // Send tool result to webview
                 this.sendToWebview({
                     type: 'toolResult',
                     conversationId: id,
                     toolName: toolResult.tool_name,
                     success: toolResult.success,
                     result: toolResult.result,
-                    error: toolResult.error,
-                    diffId: diffId
+                    error: toolResult.error
                 });
                 return;
             }
-            
+
+            // Handle message added events
+            if (updateType === 'messageAdded') {
+                const messageEvent = data as ChatEvent;
+                const chatMessage = (messageEvent as { MessageAdded: any }).MessageAdded;
+
+                this.sendToWebview({
+                    type: 'conversationMessage',
+                    conversationId: id,
+                    messageType: 'messageAdded',
+                    message: chatMessage
+                });
+                return;
+            }
+
+            // Handle error events
+            if (updateType === 'error') {
+                const errorEvent = data as ChatEvent;
+                const errorMessage = (errorEvent as { Error: string }).Error;
+
+                this.sendToWebview({
+                    type: 'conversationMessage',
+                    conversationId: id,
+                    messageType: 'error',
+                    message: {
+                        role: 'error',
+                        content: errorMessage
+                    }
+                });
+                return;
+            }
+
             // Handle typing status events
             if (updateType === 'typing_status') {
                 console.log('[MainProvider] Received typing_status:', id, data);
-                
-                // Check if this is actually a retry attempt event
-                if (data.event_type === 'retry_attempt') {
-                    console.log('[MainProvider] Processing retry_attempt:', data);
-                    this.sendToWebview({
-                        type: 'retryAttempt',
-                        conversationId: id,
-                        attempt: data.attempt,
-                        maxRetries: data.max_retries,
-                        error: data.error,
-                        backoffMs: data.backoff_ms
-                    });
-                    return;
-                }
-                
-                // Standard typing status
+
+                const typingEvent = data as ChatEvent;
+                const isTyping = (typingEvent as { TypingStatusChanged: boolean }).TypingStatusChanged;
+
                 this.sendToWebview({
                     type: 'showTyping',
                     conversationId: id,
-                    show: data.is_typing
+                    show: isTyping
                 });
                 return;
             }
-            
-            // Standard message handling for non-toolResult events
-            const message = data as ConversationMessage;
-            
-            this.sendToWebview({
-                type: 'conversationMessage',
-                conversationId: id,
-                messageType: updateType,
-                message
-            });
+
+            // Handle retry attempt events  
+            if (updateType === 'retry_attempt') {
+                console.log('[MainProvider] Processing retry_attempt:', data);
+                const retryEvent = data as ChatEvent;
+                const retryData = (retryEvent as { RetryAttempt: any }).RetryAttempt;
+
+                this.sendToWebview({
+                    type: 'retryAttempt',
+                    conversationId: id,
+                    attempt: retryData.attempt,
+                    maxRetries: retryData.max_retries,
+                    error: retryData.error,
+                    backoffMs: retryData.backoff_ms
+                });
+                return;
+            }
+
+            console.warn('[MainProvider] Unhandled conversation update type:', updateType);
         });
 
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, (id: string, title: string) => {
@@ -236,7 +348,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
             conversations: conversations.map(c => ({
                 id: c.id,
                 title: c.title,
-                messages: c.messages,
                 selectedProvider: c.selectedProvider
             })),
             activeConversationId: activeConversation?.id || null
@@ -339,7 +450,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
         try {
             await conversation.switchProvider(provider);
-            
+
             this.sendToWebview({
                 type: 'providerSwitched',
                 conversationId,
@@ -351,29 +462,40 @@ export class MainProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private handleGetCachedProviders(conversationId: string): void {
+    private async handleGetCachedProviders(conversationId: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
-        
-        // Note: Settings handling needs to be updated for new client architecture
-        // For now, send empty response until settings integration is complete
+        if (!conversation) {
+            return;
+        }
+
+        // Reload providers from settings
+        await this.loadProvidersFromSettings();
+
+        // Get the active provider for this conversation (initially the default)
+        const selectedProvider = conversation.selectedProvider || this.cachedActiveProvider;
+
         this.sendToWebview({
             type: 'providerConfig',
             conversationId,
-            providers: [],
-            selectedProvider: null
+            providers: this.cachedProviders,
+            selectedProvider
         });
     }
 
     private async handleRefreshProviders(conversationId: string): Promise<void> {
+        // Force reload from disk
+        await this.loadProvidersFromSettings();
+
         const conversation = this.conversationManager.getConversation(conversationId);
-        
-        // Note: Settings refresh needs to be updated for new client architecture
-        // For now, send empty response until settings integration is complete
+        if (!conversation) {
+            return;
+        }
+
         this.sendToWebview({
             type: 'providerConfig',
             conversationId,
-            providers: [],
-            selectedProvider: null
+            providers: this.cachedProviders,
+            selectedProvider: conversation.selectedProvider || this.cachedActiveProvider
         });
     }
 
@@ -398,7 +520,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
             vscode.window.showWarningMessage('Diff data not found');
             return;
         }
-        
+
         console.log('[MainProvider] Diff data found:', {
             filePath: diffData.filePath,
             originalLength: diffData.originalContent?.length,
@@ -411,15 +533,15 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
         // Register a text document content provider for the diff
         const provider = new class implements vscode.TextDocumentContentProvider {
-            constructor(private data: DiffData) {}
-            
+            constructor(private data: DiffData) { }
+
             provideTextDocumentContent(uri: vscode.Uri): string {
                 console.log('[MainProvider] provideTextDocumentContent called');
                 console.log('[MainProvider] URI scheme:', uri.scheme);
                 console.log('[MainProvider] URI authority:', uri.authority);
                 console.log('[MainProvider] URI path:', uri.path);
                 console.log('[MainProvider] Full URI:', uri.toString());
-                
+
                 if (uri.scheme === 'tycode-diff') {
                     if (uri.authority === 'before') {
                         console.log('[MainProvider] Returning original content, length:', this.data.originalContent?.length);
@@ -490,7 +612,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 return;
             }
         }
-        
+
         if (conversation) {
             await this.handleSendMessage(conversation.id, message);
         }

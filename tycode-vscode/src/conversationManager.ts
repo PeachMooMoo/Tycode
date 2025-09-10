@@ -34,25 +34,21 @@ export class ConversationManager extends EventEmitter {
         this.conversations.set(id, conversation);
         this.activeConversationId = id;
 
-        // Forward conversation events
-        conversation.on(CONVERSATION_EVENTS.RESPONSE, (message) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'response', message);
+        // Forward conversation events - now using raw ChatEvent objects
+        conversation.on(CONVERSATION_EVENTS.MESSAGE_ADDED, (event) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'messageAdded', event);
         });
 
-        conversation.on(CONVERSATION_EVENTS.USER_MESSAGE, (message) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'userMessage', message);
+        conversation.on(CONVERSATION_EVENTS.ERROR, (event) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'error', event);
         });
 
-        conversation.on(CONVERSATION_EVENTS.SYSTEM, (message) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'system', message);
+        conversation.on(CONVERSATION_EVENTS.TOOL_EXECUTION_COMPLETED, (event) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolExecutionCompleted', event);
         });
 
-        conversation.on(CONVERSATION_EVENTS.ERROR, (message) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'error', message);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.TOOL_RESULT, (result) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolResult', result);
+        conversation.on(CONVERSATION_EVENTS.TOOL_REQUEST, (event) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolRequest', event);
         });
 
         conversation.on(CONVERSATION_EVENTS.TITLE_CHANGED, (newTitle) => {

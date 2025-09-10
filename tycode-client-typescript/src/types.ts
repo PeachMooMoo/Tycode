@@ -5,26 +5,51 @@ export type ChatEvent =
   | { Settings: any }
   | { TypingStatusChanged: boolean }
   | 'ConversationCleared'
+  | { ToolRequest: ToolRequest }
   | {
-      ToolExecutionCompleted: {
-        tool_name: string,
-        success: boolean,
-        result?: any,
-        ui_data?: any,
-        error?: string
-      }
+    ToolExecutionCompleted: {
+      tool_name: string,
+      success: boolean,
+      result?: any,
+      ui_data?: any,
+      error?: string
     }
+  }
   | { OperationCancelled: { message: string } }
   | {
-      RetryAttempt: {
-        attempt: number,
-        max_retries: number,
-        error: string,
-        backoff_ms: number
-      }
+    RetryAttempt: {
+      attempt: number,
+      max_retries: number,
+      error: string,
+      backoff_ms: number
     }
+  }
   | { Error: string }
 
+// Helper for exhaustiveness
+export type ChatEventTag =
+  | 'MessageAdded'
+  | 'Settings'
+  | 'TypingStatusChanged'
+  | 'ConversationCleared'
+  | 'ToolRequest'
+  | 'ToolExecutionCompleted'
+  | 'OperationCancelled'
+  | 'RetryAttempt'
+  | 'Error';
+
+export function getChatEventTag(event: ChatEvent): ChatEventTag {
+  if (typeof event === 'string') return 'ConversationCleared';
+  if ('MessageAdded' in event) return 'MessageAdded';
+  if ('Settings' in event) return 'Settings';
+  if ('TypingStatusChanged' in event) return 'TypingStatusChanged';
+  if ('ToolRequest' in event) return 'ToolRequest';
+  if ('ToolExecutionCompleted' in event) return 'ToolExecutionCompleted';
+  if ('OperationCancelled' in event) return 'OperationCancelled';
+  if ('RetryAttempt' in event) return 'RetryAttempt';
+  if ('Error' in event) return 'Error';
+  throw new Error('Unknown event');
+}
 export interface ChatMessage {
   timestamp: number;
   sender: MessageSender;
@@ -70,6 +95,14 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+}
+
+export type ToolRequestType = { ModifyFile: { file_path: string; before: string; after: string } } | { Other: { args: any } }
+
+export interface ToolRequest {
+  tool_name: string;
+  arguments: any;
+  tool_type: ToolRequestType;
 }
 
 // Exact port from tycode-core/src/chat/actor.rs

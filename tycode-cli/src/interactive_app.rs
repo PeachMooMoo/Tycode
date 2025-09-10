@@ -140,6 +140,9 @@ impl EventFormatter for InteractiveApp {
                     error.as_deref(),
                 );
             }
+            ChatEvent::OperationCancelled { .. } => {
+                self.formatter.print_system("Operation Cancelled");
+            }
             _ => {}
         }
         Ok(())

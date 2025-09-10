@@ -40,19 +40,6 @@ impl MessageContext {
     pub fn to_formatted_string(&self) -> String {
         let mut result = String::new();
 
-        if self.working_directories.len() == 1 {
-            result.push_str(&format!(
-                "Working Directory: {}\n\n",
-                self.working_directories[0].display()
-            ));
-        } else {
-            result.push_str("Working Directories:\n");
-            for dir in &self.working_directories {
-                result.push_str(&format!("  {}\n", dir.display()));
-            }
-            result.push('\n');
-        }
-
         if !self.relevant_files.is_empty() {
             result.push_str("Project Files:\n");
             result.push_str(&self.build_file_tree());

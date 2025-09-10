@@ -215,10 +215,6 @@ fn handle_cancelled(state: &mut ActorState) {
         .send(ChatEvent::OperationCancelled {
             message: "Operation cancelled by user".to_string(),
         });
-
-    state
-        .event_sender
-        .add_message(ChatMessage::system("Operation cancelled".to_string()));
 }
 
 async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {

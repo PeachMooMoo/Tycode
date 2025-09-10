@@ -38,6 +38,7 @@ impl OpenRouterProvider {
             Model::GptOss120b => "openai/gpt-oss-120b",
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
             Model::Qwen3Coder => "qwen/qwen3-coder",
+            Model::Gemini25Flash => "google/gemini-2.5-flash",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -89,6 +90,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GptOss120b,
             Model::GrokCodeFast1,
             Model::Qwen3Coder,
+            Model::Gemini25Flash,
         ]
     }
 
@@ -219,6 +221,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GptOss120b => Cost::new(0.0001, 0.0005),
             Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
             Model::Qwen3Coder => Cost::new(0.00035, 0.0015),
+            Model::Gemini25Flash => Cost::new(0.0003, 0.0025),
             _ => Cost::new(0.0, 0.0),
         }
     }
@@ -575,10 +578,12 @@ fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<
     if let Some(reasoning_details) = &message.reasoning_details {
         for detail in reasoning_details {
             match detail {
-                ReasoningDetail::Text { text, .. } => {
+                ReasoningDetail::Text {
+                    text, signature, ..
+                } => {
                     content_blocks.push(ContentBlock::ReasoningContent(ReasoningData {
                         text: text.clone(),
-                        signature: None,
+                        signature: signature.clone(),
                         blob: None,
                     }));
                 }

@@ -72,6 +72,9 @@
             case 'retryAttempt':
                 handleRetryAttempt(message);
                 break;
+            case 'toolRequest':
+                handleToolRequest(message);
+                break;
         }
     });
 
@@ -374,12 +377,34 @@
         displayMessage(message.conversationId, message.message);
     }
 
-    function displayMessage(conversationId, message) {
+    function displayMessage(conversationId, chatMessage) {
         const conversation = conversations.get(conversationId);
         if (!conversation) return;
 
         const messagesContainer = conversation.viewElement.querySelector('.messages');
-        const { role, content, reasoning, toolCalls, model, isComplete, tokenUsage } = message;
+        
+        // Handle ChatMessage structure directly
+        let role, content, reasoning, toolCalls, model, isComplete, tokenUsage;
+        
+        if (chatMessage.sender) {
+            // This is a ChatMessage from Rust
+            role = getRoleFromSender(chatMessage.sender);
+            content = chatMessage.content;
+            reasoning = chatMessage.reasoning?.text;
+            toolCalls = chatMessage.tool_calls || [];
+            model = chatMessage.model_info?.model;
+            isComplete = true; // MessageAdded events are complete
+            tokenUsage = chatMessage.token_usage;
+        } else {
+            // Legacy message format or error message
+            role = chatMessage.role || 'system';
+            content = chatMessage.content;
+            reasoning = chatMessage.reasoning;
+            toolCalls = chatMessage.toolCalls || [];
+            model = chatMessage.model;
+            isComplete = chatMessage.isComplete;
+            tokenUsage = chatMessage.tokenUsage;
+        }
 
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
@@ -400,8 +425,8 @@
             let reasoningSection = '';
             if (reasoning) {
                 const reasoningId = 'reasoning-' + Date.now();
-                const isLong = reasoning.length > 200;
-                const truncated = isLong ? reasoning.substring(0, 200) + '...' : reasoning;
+                const isLong = reasoning.length > 120;
+                const truncated = isLong ? reasoning.substring(0, 120) + '...' : reasoning;
 
                 reasoningSection = `
                     <div class="embedded-reasoning">
@@ -434,7 +459,7 @@
                                 <span class="tool-name">${toolCall.name}</span>
                                 <span class="tool-status-text">Executing...</span>
                             </div>
-                            ${toolCall.arguments ? `<div class="tool-details"><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre></div>` : ''}
+                            ${formatToolDetails(toolCall)}
                             <div class="tool-result" style="display: none;"></div>
                         </div>
                     `;
@@ -479,7 +504,7 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
         // Store message
-        conversation.messages.push(message);
+        conversation.messages.push(chatMessage);
     }
 
     function toggleReasoning(reasoningId) {
@@ -596,7 +621,7 @@
                     sendButton.style.display = 'block';
                     cancelButton.style.display = 'none';
                     conversation.isProcessing = false;
-                    
+
                     // Clear retry status when processing completes
                     const retryElement = currentRetryElements.get(message.conversationId);
                     if (retryElement) {
@@ -655,6 +680,63 @@
                 content: 'Connection to backend lost. Please close this tab and start a new chat.'
             });
         }
+    }
+
+    function handleToolRequest(message) {
+        console.log('Tool request received:', message);
+
+        const { conversationId, toolName, arguments: toolArgs, toolType, diffId } = message;
+        const conversation = conversations.get(conversationId);
+        if (!conversation) {
+            console.warn('No conversation found for:', conversationId);
+            return;
+        }
+
+        const messagesContainer = conversation.viewElement.querySelector('.messages');
+        if (!messagesContainer) {
+            console.warn('No messages container found for conversation:', conversationId);
+            return;
+        }
+
+        // Find the most recent tool-call-item for this tool in the conversation
+        const toolItems = conversation.viewElement.querySelectorAll(`.tool-call-item[data-tool-name="${toolName}"]`);
+        if (toolItems.length === 0) {
+            console.warn('No tool item found for:', toolName, 'in conversation:', conversationId);
+            return;
+        }
+
+        const toolItem = toolItems[toolItems.length - 1]; // Get the most recent
+
+        // Update status icon and text to 'Requested'
+        const statusIcon = toolItem.querySelector('.tool-status-icon');
+        const statusText = toolItem.querySelector('.tool-status-text');
+        statusIcon.textContent = '🔧';
+        statusText.textContent = 'Requested';
+
+        // Add arguments to tool-details if present (but not for ModifyFile with diffId, where we show view diff button instead)
+        if (toolArgs && Object.keys(toolArgs).length > 0 && !(toolType && 'ModifyFile' in toolType && diffId)) {
+            let detailsDiv = toolItem.querySelector('.tool-details');
+            if (!detailsDiv) {
+                detailsDiv = document.createElement('div');
+                detailsDiv.className = 'tool-details';
+                toolItem.appendChild(detailsDiv);
+            }
+            detailsDiv.innerHTML = `<pre>${escapeHtml(JSON.stringify(toolArgs, null, 2))}</pre>`;
+        }
+
+        // Add View Diff button for ModifyFile requests
+        if (toolType && 'ModifyFile' in toolType && diffId) {
+            let actionsDiv = toolItem.querySelector('.tool-request-actions');
+            if (!actionsDiv) {
+                actionsDiv = document.createElement('div');
+                actionsDiv.className = 'tool-request-actions';
+                toolItem.appendChild(actionsDiv);
+            }
+            actionsDiv.innerHTML = `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>`;
+        }
+
+        // Scroll to show the update
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function handleToolResult(message) {
@@ -821,6 +903,13 @@
         return div.innerHTML;
     }
 
+    function formatToolDetails(toolCall) {
+        if (!toolCall.arguments) return '';
+
+        // For all tools, show the raw JSON arguments as fallback
+        return `<div class="tool-details"><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre></div>`;
+    }
+
     function addCodeActions(messageDiv) {
         const codeBlocks = messageDiv.querySelectorAll('.code-block-container');
 
@@ -957,6 +1046,24 @@
         }, 0);
 
         document.body.appendChild(menu);
+    }
+
+    function getRoleFromSender(sender) {
+        if (sender === 'User') {
+            return 'user';
+        }
+        if (sender === 'System') {
+            return 'system';
+        }
+        if (sender === 'Error') {
+            return 'error';
+        }
+        if (typeof sender === 'object' && sender !== null && 'Assistant' in sender) {
+            return 'assistant';
+        }
+        // exhaustiveness check - if we get here, it's an unknown sender type
+        console.error('Unknown sender type:', sender);
+        return 'system'; // fallback
     }
 
     // Handle View Diff button clicks using event delegation
