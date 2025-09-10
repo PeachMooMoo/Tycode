@@ -1,14 +1,17 @@
-use crate::base_app::BaseApp;
 use crate::event_handler::EventFormatter;
 use crate::formatter::Formatter;
 use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
+use tokio::sync::mpsc;
+use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::settings::manager::SettingsManager;
 
 pub struct InteractiveApp {
-    base: BaseApp,
+    chat_actor: ChatActor,
+    event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     formatter: Formatter,
 }
 
@@ -17,7 +20,13 @@ impl InteractiveApp {
         workspace_roots: Option<Vec<PathBuf>>,
         settings_path: Option<PathBuf>,
     ) -> Result<Self> {
-        let base = BaseApp::new(workspace_roots, settings_path).await?;
+        let settings_manager = match settings_path {
+            Some(path) => SettingsManager::from_path(path)?,
+            None => SettingsManager::new()?,
+        };
+
+        let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
+        let (chat_actor, event_rx) = ChatActor::launch(workspace_roots, settings_manager);
         let formatter = Formatter::new();
 
         let welcome_message =
@@ -25,7 +34,11 @@ impl InteractiveApp {
 
         formatter.print_system(welcome_message);
 
-        Ok(Self { base, formatter })
+        Ok(Self {
+            chat_actor,
+            event_rx,
+            formatter,
+        })
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -53,7 +66,7 @@ impl InteractiveApp {
             }
 
             rl.add_history_entry(&line)?;
-            self.base.send_message(input.to_string())?;
+            self.chat_actor.send_message(input.to_string())?;
             self.wait_for_response().await?;
         }
 
@@ -65,7 +78,7 @@ impl InteractiveApp {
         use tokio::signal;
         loop {
             tokio::select! {
-                recv = self.base.event_rx.recv() => {
+                recv = self.event_rx.recv() => {
                     match recv {
                         Some(event) => {
                             let is_complete = match &event {
@@ -83,7 +96,7 @@ impl InteractiveApp {
                     }
                 }
                 _ = signal::ctrl_c() => {
-                    self.base.cancel()?;
+                    self.chat_actor.cancel()?;
                     continue;
                 }
             }

@@ -6,24 +6,16 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-mod base_app;
 mod event_handler;
 mod formatter;
 mod interactive_app;
-mod subprocess;
-mod subprocess_app;
 
 use crate::interactive_app::InteractiveApp;
-use crate::subprocess_app::SubprocessApp;
 
 #[derive(Parser, Debug)]
 #[command(name = "tycode-cli")]
 #[command(about = "TyCode CLI - Native terminal chat interface")]
 struct Args {
-    /// Run in subprocess mode for VSCode extension
-    #[arg(long)]
-    subprocess: bool,
-
     /// Workspace roots (for multi-root workspaces)
     #[arg(long, value_delimiter = ',')]
     workspace_roots: Option<Vec<String>>,
@@ -49,13 +41,11 @@ fn main() -> Result<()> {
 async fn async_main() -> Result<()> {
     let args = Args::parse();
 
-    if !args.subprocess {
-        if std::env::var("RUST_LOG").is_ok() {
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-                .with_writer(std::io::stderr)
-                .init();
-        }
+    if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
     }
 
     let workspace_roots = args
@@ -73,13 +63,8 @@ async fn async_main() -> Result<()> {
         })
         .transpose()?;
 
-    if args.subprocess {
-        let app = SubprocessApp::new(workspace_roots, args.settings_path).await?;
-        app.run().await?;
-    } else {
-        let mut app = InteractiveApp::new(workspace_roots, args.settings_path).await?;
-        app.run().await?;
-    }
+    let mut app = InteractiveApp::new(workspace_roots, args.settings_path).await?;
+    app.run().await?;
 
     Ok(())
 }
