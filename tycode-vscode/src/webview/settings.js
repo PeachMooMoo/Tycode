@@ -17,6 +17,41 @@ window.addEventListener('message', event => {
     }
 });
 
+// Set up event listeners when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Add provider button
+    document.getElementById('addProviderBtn').addEventListener('click', showAddProviderModal);
+    
+    // Provider type dropdown in modal
+    document.getElementById('providerType').addEventListener('change', function() {
+        updateProviderFields(this.value);
+    });
+    
+    // Modal buttons
+    document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+    document.getElementById('saveProviderBtn').addEventListener('click', saveProvider);
+    document.getElementById('cancelDeleteBtn').addEventListener('click', cancelDelete);
+    document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
+    
+    // Save settings button
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+    
+    // Event delegation for dynamically generated provider list
+    document.getElementById('providerList').addEventListener('change', function(e) {
+        if (e.target.type === 'radio' && e.target.name === 'activeProvider') {
+            setActiveProvider(e.target.value);
+        }
+    });
+    
+    document.getElementById('providerList').addEventListener('click', function(e) {
+        if (e.target.classList.contains('edit-btn')) {
+            editProvider(e.target.dataset.provider);
+        } else if (e.target.classList.contains('delete-btn')) {
+            deleteProvider(e.target.dataset.provider);
+        }
+    });
+});
+
 function renderProviders() {
     const list = document.getElementById('providerList');
     list.innerHTML = '';
@@ -50,13 +85,12 @@ function renderProviders() {
         item.innerHTML = '<div class="provider-header">' +
             '<div class="provider-name">' +
             '<input type="radio" name="activeProvider" value="' + name + '" ' +
-            (isActive ? 'checked' : '') + ' ' +
-            'onchange="setActiveProvider(\'' + name + '\')">' +
+            (isActive ? 'checked' : '') + '>' +
             '<span>' + name + ' (' + providerTypeLabel + ')</span>' +
             '</div>' +
             '<div class="provider-actions">' +
-            '<button onclick="editProvider(\'' + name + '\')">' + 'Edit' + '</button>' +
-            '<button class="danger" onclick="deleteProvider(\'' + name + '\')">' + 'Delete' + '</button>' +
+            '<button class="edit-btn" data-provider="' + name + '">Edit</button>' +
+            '<button class="danger delete-btn" data-provider="' + name + '">Delete</button>' +
             '</div>' +
             '</div>' +
             '<div class="provider-details">' + providerInfo + '</div>';

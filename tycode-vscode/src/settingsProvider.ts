@@ -22,7 +22,8 @@ export class SettingsProvider {
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.context.extensionUri]
             }
         );
 
@@ -87,7 +88,7 @@ export class SettingsProvider {
             console.error('[SettingsProvider] Error loading settings:', error);
             vscode.window.showErrorMessage(`Failed to load settings: ${error}`);
             
-            // Return empty settings on error
+            // Return empty settings to allow webview to render blank form, user can configure providers
             return {
                 active_provider: '',
                 providers: {}
@@ -131,24 +132,28 @@ export class SettingsProvider {
     }
 
     private getSettingsCssUri(): vscode.Uri {
-        const cssPath = path.join(this.context.extensionPath, 'src', 'webview', 'settings.css');
-        return this.panel!.webview.asWebviewUri(vscode.Uri.file(cssPath));
+        return this.panel!.webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'settings.css')
+        );
     }
 
     private getSettingsJsUri(): vscode.Uri {
-        const jsPath = path.join(this.context.extensionPath, 'src', 'webview', 'settings.js');
-        return this.panel!.webview.asWebviewUri(vscode.Uri.file(jsPath));
+        return this.panel!.webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'settings.js')
+        );
     }
 
     private getWebviewContent(): string {
         const cssUri = this.getSettingsCssUri();
         const jsUri = this.getSettingsJsUri();
+        const nonce = this.getNonce();
         
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel!.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <title>TyCode Settings</title>
     <link rel="stylesheet" href="${cssUri}">
 </head>
@@ -160,11 +165,11 @@ export class SettingsProvider {
         <div class="provider-list" id="providerList">
             <!-- Providers will be dynamically added here -->
         </div>
-        <button class="add-provider-btn" onclick="showAddProviderModal()">+ Add Provider</button>
+        <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
     </div>
     
     <div class="actions">
-        <button class="primary" onclick="saveSettings()">Save Settings</button>
+        <button class="primary" id="saveSettingsBtn">Save Settings</button>
     </div>
     
     <!-- Add/Edit Provider Modal -->
@@ -178,7 +183,7 @@ export class SettingsProvider {
             </div>
             <div class="form-group">
                 <label for="providerType">Type</label>
-                <select id="providerType" onchange="updateProviderFields(this.value)">
+                <select id="providerType">
                     <option value="bedrock">AWS Bedrock</option>
                     <option value="openrouter">OpenRouter</option>
                 </select>
@@ -187,8 +192,8 @@ export class SettingsProvider {
                 <!-- Dynamic fields based on provider type -->
             </div>
             <div class="modal-footer">
-                <button onclick="closeModal()">Cancel</button>
-                <button class="primary" onclick="saveProvider()">Save</button>
+                <button id="closeModalBtn">Cancel</button>
+                <button class="primary" id="saveProviderBtn">Save</button>
             </div>
         </div>
     </div>
@@ -201,15 +206,24 @@ export class SettingsProvider {
                 Are you sure you want to delete the provider "<span id="deleteProviderName"></span>"?
             </div>
             <div class="modal-footer">
-                <button onclick="cancelDelete()">Cancel</button>
-                <button class="danger" onclick="confirmDelete()">Delete</button>
+                <button id="cancelDeleteBtn">Cancel</button>
+                <button class="danger" id="confirmDeleteBtn">Delete</button>
             </div>
         </div>
     </div>
     
-    <script src="${jsUri}"></script>
+    <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;
+    }
+
+    private getNonce(): string {
+        let text = '';
+        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        for (let i = 0; i < 32; i++) {
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
     }
 
     public dispose() {
