@@ -86,7 +86,7 @@ impl Formatter {
                     self.print_tool_call(name, args);
                 }
             }
-            "replace_in_file" => {
+            "modify_file" => {
                 if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
                     let diff_count = self.count_diff_blocks(args.get("diff"));
                     self.print_system(&format!(
@@ -186,7 +186,7 @@ impl Formatter {
                             self.print_system(&format!("  {} file ({} bytes)", action, bytes));
                         }
                     }
-                    "replace_in_file" => {
+                    "modify_file" => {
                         if let Some(reps) = res.get("replacements_made").and_then(|v| v.as_u64()) {
                             self.print_system(&format!("  {} replacements made", reps));
                         }
@@ -233,7 +233,7 @@ impl Formatter {
     }
 
     fn is_file_related(&self, name: &str) -> bool {
-        matches!(name, "write_file" | "replace_in_file")
+        matches!(name, "write_file" | "modify_file")
     }
 
     fn calculate_diff_summary(&self, orig: &str, new: &str) -> (usize, usize) {
@@ -258,8 +258,14 @@ impl Formatter {
     }
 
     fn print_run_build_test_result(&self, res: &serde_json::Value) {
-        let command = res.get("command").and_then(serde_json::Value::as_str).unwrap_or("unknown");
-        let working_directory = res.get("working_directory").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        let command = res
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let working_directory = res
+            .get("working_directory")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
         if self.use_colors {
             println!("  \x1b[32mCommand:\x1b[0m {}", command);
             println!("  \x1b[32mWorking Directory:\x1b[0m {}", working_directory);
@@ -269,14 +275,21 @@ impl Formatter {
             println!("  Working Directory: {}", working_directory);
             println!("  Status: Success");
         }
-        if res.get("timed_out").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        if res
+            .get("timed_out")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
             if self.use_colors {
                 println!("  \x1b[32mTimed Out:\x1b[0m \x1b[32mYes\x1b[0m");
             } else {
                 println!("  Timed Out: Yes");
             }
         } else {
-            let exit_code = res.get("exit_code").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let exit_code = res
+                .get("exit_code")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1);
             if self.use_colors {
                 println!("  \x1b[32mExit Code:\x1b[0m \x1b[32m{}\x1b[0m", exit_code);
             } else {

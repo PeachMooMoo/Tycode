@@ -25,14 +25,12 @@ use super::run_build_test::RunBuildTestTool;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn ToolExecutor>>,
-    file_modification_api: FileModificationApi,
 }
 
 impl ToolRegistry {
     pub fn new(workspace_roots: Vec<PathBuf>, file_modification_api: FileModificationApi) -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
-            file_modification_api: file_modification_api.clone(),
         };
 
         registry.register_file_tools(workspace_roots.clone(), file_modification_api);
@@ -83,31 +81,11 @@ impl ToolRegistry {
         self.tools.insert(name, tool);
     }
 
-    /// Maps abstract tool types to concrete tool names based on configuration
-    fn get_concrete_tool_name(&self, tool_type: ToolType) -> Option<&'static str> {
-        match tool_type {
-            ToolType::ReadFile => Some("read_file"),
-            ToolType::WriteFile => Some("write_file"),
-            ToolType::ListFiles => Some("list_files"),
-            ToolType::SearchFiles => Some("search_files"),
-            ToolType::ModifyFile => match self.file_modification_api {
-                FileModificationApi::Patch => Some("apply_patch"),
-                FileModificationApi::FindReplace => Some("replace_in_file"),
-            },
-            ToolType::RunBuildTestCommand => Some("run_build_test"),
-            ToolType::DeleteFile => Some("delete_file"),
-            ToolType::SetTrackedFiles => Some("set_tracked_files"),
-            ToolType::SpawnAgent => Some("spawn_agent"),
-            ToolType::CompleteTask => Some("complete_task"),
-            ToolType::AskUserQuestion => Some("ask_user_question"),
-        }
-    }
-
     /// Gets tool definitions for a specific set of tool types
     pub fn get_tool_definitions_for_types(&self, tool_types: &[ToolType]) -> Vec<ToolDefinition> {
         tool_types
             .iter()
-            .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
+            .map(|&tool_type| tool_type.name())
             .filter_map(|tool_name| self.tools.get(tool_name))
             .map(|tool| ToolDefinition {
                 name: tool.name().to_string(),
@@ -150,7 +128,7 @@ impl ToolRegistry {
         // Then check if the tool is allowed by the agent (if restrictions are provided)
         let allowed_names: Vec<&str> = allowed_tool_types
             .iter()
-            .filter_map(|&tool_type| self.get_concrete_tool_name(tool_type))
+            .map(|&tool_type| tool_type.name())
             .collect();
 
         if !allowed_names.contains(&tool_use.name.as_str()) {

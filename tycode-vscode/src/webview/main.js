@@ -382,10 +382,10 @@
         if (!conversation) return;
 
         const messagesContainer = conversation.viewElement.querySelector('.messages');
-        
+
         // Handle ChatMessage structure directly
         let role, content, reasoning, toolCalls, model, isComplete, tokenUsage;
-        
+
         if (chatMessage.sender) {
             // This is a ChatMessage from Rust
             role = getRoleFromSender(chatMessage.sender);
@@ -785,7 +785,7 @@
                 resultContent = `<div class="tool-error-message">${escapeHtml(error)}</div>`;
             } else if (result) {
                 // Special formatting for different tool types
-                if (toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'apply_patch') {
+                if (toolName === 'write_file' || toolName === 'modify_file') {
                     // File modification tools  
                     if (result.path) {
                         resultContent = `<div class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</div>`;

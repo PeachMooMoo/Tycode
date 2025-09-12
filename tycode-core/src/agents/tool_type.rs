@@ -36,7 +36,7 @@ impl ToolType {
             "write_file" => Some(Self::WriteFile),
             "list_files" => Some(Self::ListFiles),
             "search_files" => Some(Self::SearchFiles),
-            "modify_file" | "apply_patch" | "replace_in_file" => Some(Self::ModifyFile),
+            "modify_file" => Some(Self::ModifyFile),
             "run_build_test" => Some(Self::RunBuildTestCommand),
             "delete_file" => Some(Self::DeleteFile),
             "set_tracked_files" => Some(Self::SetTrackedFiles),

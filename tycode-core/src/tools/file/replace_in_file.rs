@@ -52,7 +52,7 @@ impl ReplaceInFileTool {
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ReplaceInFileTool {
     fn name(&self) -> &'static str {
-        "replace_in_file"
+        "modify_file"
     }
 
     fn description(&self) -> &'static str {
@@ -65,17 +65,17 @@ impl ToolExecutor for ReplaceInFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to modify. Note: File to modify must be tracked using the track_file tool before being modified. Search block in diff must exactly match the current file context from the context."
+                    "description": "Absolute path to the file to modify. Must be tracked using the set_tracked_files tool before being modified. Paths must always be absolute (e.g., starting from the project root like /tycode/...). The search block in diff must exactly match the content of the file to replace from the context."
                 },
                 "diff": {
                     "type": "array",
-                    "description": "Array of search and replace blocks",
+                    "description": "Array of search and replace blocks. You can (and should) specify multiple find/replace blocks for the same file to apply multiple changes at once.",
                     "items": {
                         "type": "object",
                         "properties": {
                             "search": {
                                 "type": "string",
-                                "description": "Exact content to find"
+                                "description": "Exact content to find. The search block must exactly match exactly one string in the source file — do not use it to match multiple instances (e.g., you cannot replace all 'banana' with 'carrot' if there are multiple 'banana'). Include sufficient unique surrounding context to ensure unambiguous, exact matching."
                             },
                             "replace": {
                                 "type": "string",

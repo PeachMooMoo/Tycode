@@ -87,7 +87,7 @@ impl ApplyPatchTool {
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ApplyPatchTool {
     fn name(&self) -> &'static str {
-        "apply_patch"
+        "modify_file"
     }
 
     fn description(&self) -> &'static str {
