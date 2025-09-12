@@ -1,6 +1,6 @@
 use crate::agents::{
     agent::Agent, code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
-    one_shot::OneShotAgent,
+    one_shot::OneShotAgent, recon::ReconAgent,
 };
 
 /// Information about an available agent
@@ -26,6 +26,10 @@ impl AgentCatalog {
                 description: "Handles complete coding tasks in a single, all-in-one workflow".to_string(),
             },
             AgentInfo {
+                name: "recon".to_string(),
+                description: "Explores files and summarizes information about project structure, existing components, and relevant file locations to aid planning".to_string(),
+            },
+            AgentInfo {
                 name: "coder".to_string(),
                 description: "Executes assigned coding tasks, applying patches and managing files".to_string(),
             },
@@ -41,6 +45,7 @@ impl AgentCatalog {
         match name {
             "coordinator" => Some(Box::new(CoordinatorAgent)),
             "one_shot" => Some(Box::new(OneShotAgent)),
+            "recon" => Some(Box::new(ReconAgent)),
             "coder" => Some(Box::new(CoderAgent)),
             "code_reviewer" => Some(Box::new(CodeReviewAgent)),
             _ => None,

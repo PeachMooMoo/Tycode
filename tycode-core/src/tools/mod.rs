@@ -3,5 +3,5 @@ pub mod complete_task;
 pub mod file;
 pub mod registry;
 pub mod run_build_test;
-pub mod spawn_agent;
+pub mod spawn;
 pub mod r#trait;

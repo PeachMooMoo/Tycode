@@ -14,7 +14,7 @@ use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
-use crate::tools::spawn_agent::SpawnAgent;
+use crate::tools::spawn::spawn_agent::SpawnAgent;
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;

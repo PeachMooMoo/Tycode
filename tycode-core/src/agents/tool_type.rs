@@ -9,6 +9,7 @@ pub enum ToolType {
     DeleteFile,
     SetTrackedFiles,
     SpawnAgent,
+    SpawnRecon,
     CompleteTask,
     AskUserQuestion,
 }
@@ -25,6 +26,7 @@ impl ToolType {
             Self::DeleteFile => "delete_file",
             Self::SetTrackedFiles => "set_tracked_files",
             Self::SpawnAgent => "spawn_agent",
+            Self::SpawnRecon => "spawn_recon",
             Self::CompleteTask => "complete_task",
             Self::AskUserQuestion => "ask_user_question",
         }
