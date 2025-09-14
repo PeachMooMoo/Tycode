@@ -1,7 +1,8 @@
+use crate::ai::TokenUsage;
+use crate::chat::events::{ToolRequest, ToolRequestType};
+use crate::chat::ModelInfo;
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
-use tycode_core::ai::TokenUsage;
-use tycode_core::chat::ModelInfo;
 
 #[derive(Clone)]
 pub struct Formatter {
@@ -86,46 +87,30 @@ impl Formatter {
                     self.print_tool_call(name, args);
                 }
             }
-            "modify_file" => {
-                if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
-                    let diff_count = self.count_diff_blocks(args.get("diff"));
-                    self.print_system(&format!(
-                        "📝 Modifying file {} ({} changes)",
-                        path, diff_count
-                    ));
-                    self.render_proposed_diff(args.get("diff"));
-                } else {
-                    self.print_tool_call(name, args);
-                }
-            }
             _ => {
                 self.print_tool_call(name, args);
             }
         }
     }
 
-    fn count_diff_blocks(&self, diff: Option<&Value>) -> usize {
-        diff.and_then(|v| v.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0)
-    }
-
-    fn render_proposed_diff(&self, diff: Option<&Value>) {
-        if let Some(arr) = diff.and_then(|v| v.as_array()) {
-            for block in arr {
-                if let (Some(search), Some(replace)) = (
-                    block.get("search").and_then(|v| v.as_str()),
-                    block.get("replace").and_then(|v| v.as_str()),
-                ) {
-                    self.print_diff_block(search, replace, self.use_colors);
-                }
+    pub fn print_tool_request(&self, tool_request: &ToolRequest) {
+        match &tool_request.tool_type {
+            ToolRequestType::ModifyFile {
+                file_path,
+                before,
+                after,
+            } => {
+                self.print_system(&format!("📝 Modifying file {}", file_path));
+                self.print_file_diff(before, after, self.use_colors);
+            }
+            ToolRequestType::Other { args } => {
+                self.print_formatted_tool_call(&tool_request.tool_name, args);
             }
         }
     }
 
-    fn print_diff_block(&self, search: &str, replace: &str, use_colors: bool) {
-        // Compute and print unified diff with full context using similar crate
-        let diff = TextDiff::from_lines(search, replace);
+    fn print_file_diff(&self, before: &str, after: &str, use_colors: bool) {
+        let diff = TextDiff::from_lines(before, after);
         let mut diff = diff.unified_diff();
         let unified = diff.context_radius(7);
 
@@ -134,13 +119,7 @@ impl Formatter {
             for change in hunk.iter_changes() {
                 let line = change.value().trim_end_matches('\n');
                 match change.tag() {
-                    ChangeTag::Equal => {
-                        if use_colors {
-                            println!(" {}", line);
-                        } else {
-                            println!(" {}", line);
-                        }
-                    }
+                    ChangeTag::Equal => println!(" {}", line),
                     ChangeTag::Delete => {
                         if use_colors {
                             println!("\x1b[91m-{}\x1b[0m", line);

@@ -7,7 +7,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 mod event_handler;
-mod formatter;
 mod interactive_app;
 
 use crate::interactive_app::InteractiveApp;

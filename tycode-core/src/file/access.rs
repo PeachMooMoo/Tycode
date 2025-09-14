@@ -86,7 +86,10 @@ impl FileAccessManager {
 
         let mut paths = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
-            let resolved = self.resolver.canonicalize(&entry.path())?;
+            let Ok(resolved) = self.resolver.canonicalize(&entry.path()) else {
+                // Likely a sym link outside of the working directory (or a bug)
+                continue;
+            };
             if self.ignored(&resolved)? {
                 continue;
             }
@@ -114,7 +117,12 @@ impl FileAccessManager {
             bail!("{path:?} is not in a workspace")
         };
         let ignored = Ignored::new(&root)?;
-        Ok(ignored.is_ignored(&path.virtual_path.to_string_lossy()))
+        let is_dir = if let Ok(metadata) = path.real_path.metadata() {
+            metadata.is_dir()
+        } else {
+            false
+        };
+        Ok(ignored.is_ignored(&path.virtual_path.to_string_lossy(), is_dir))
     }
 }
 

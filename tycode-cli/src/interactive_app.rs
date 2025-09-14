@@ -1,5 +1,5 @@
 use crate::event_handler::EventFormatter;
-use crate::formatter::Formatter;
+use tycode_core::formatter::Formatter;
 use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -123,9 +123,11 @@ impl EventFormatter for InteractiveApp {
                         &message.token_usage,
                     );
 
-                    for tool_call in &message.tool_calls {
-                        self.formatter
-                            .print_formatted_tool_call(&tool_call.name, &tool_call.arguments);
+                    if !message.tool_calls.is_empty() {
+                        let count = message.tool_calls.len();
+                        let call_text = if count == 1 { "call" } else { "calls" };
+                        let names = message.tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<&str>>().join(", ");
+                        self.formatter.print_system(&format!("🔧 {} tool {}: {}", count, call_text, names));
                     }
                 }
                 MessageSender::System => {
@@ -156,7 +158,26 @@ impl EventFormatter for InteractiveApp {
             ChatEvent::OperationCancelled { .. } => {
                 self.formatter.print_system("Operation Cancelled");
             }
-            _ => {}
+            ChatEvent::Settings(_) => {
+                // Settings events are handled elsewhere in the application
+            }
+            ChatEvent::ConversationCleared => {
+                self.formatter.print_system("Conversation cleared");
+            }
+            ChatEvent::ToolRequest(tool_request) => {
+                self.formatter.print_tool_request(&tool_request);
+            }
+            ChatEvent::RetryAttempt {
+                attempt,
+                max_retries,
+                error,
+                backoff_ms,
+            } => {
+                self.formatter.print_system(&format!(
+                    "🔄 Retry attempt {}/{}: {} (waiting {}ms)",
+                    attempt, max_retries, error, backoff_ms
+                ));
+            }
         }
         Ok(())
     }

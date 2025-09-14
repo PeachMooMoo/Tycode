@@ -1,6 +1,6 @@
 use crate::chat::events::{ContextInfo, FileInfo};
 use crate::file::access::FileAccessManager;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::warn;
 
@@ -59,66 +59,19 @@ impl MessageContext {
     }
 
     fn build_file_tree(&self) -> String {
-        #[derive(Debug)]
-        struct TreeNode {
-            children: BTreeMap<String, TreeNode>,
-            is_file: bool,
+        // Changed to flat list for easier AI parsing; sorted for deterministic order.
+        let mut sorted_files: Vec<_> = self
+            .relevant_files
+            .iter()
+            .map(|p| p.to_string_lossy())
+            .collect();
+        sorted_files.sort();
+
+        let mut result = String::new();
+        for file in sorted_files {
+            result.push_str(&format!("  - {}\n", file));
         }
-
-        impl TreeNode {
-            fn new() -> Self {
-                Self {
-                    children: BTreeMap::new(),
-                    is_file: false,
-                }
-            }
-
-            fn insert(&mut self, path: &[&str]) {
-                if path.is_empty() {
-                    return;
-                }
-
-                if path.len() == 1 {
-                    self.children.entry(path[0].to_string()).or_insert_with(|| {
-                        let mut node = TreeNode::new();
-                        node.is_file = true;
-                        node
-                    });
-                } else {
-                    let child = self
-                        .children
-                        .entry(path[0].to_string())
-                        .or_insert_with(TreeNode::new);
-                    child.insert(&path[1..]);
-                }
-            }
-
-            fn format(&self, indent: usize) -> String {
-                let mut result = String::new();
-                let indent_str = " ".repeat(indent);
-
-                for (name, node) in &self.children {
-                    if node.is_file || node.children.is_empty() {
-                        result.push_str(&format!("{}{}\n", indent_str, name));
-                    } else {
-                        result.push_str(&format!("{}{}/\n", indent_str, name));
-                        result.push_str(&node.format(indent + 2));
-                    }
-                }
-
-                result
-            }
-        }
-
-        let mut root = TreeNode::new();
-
-        for file in &self.relevant_files {
-            let path_str = file.to_string_lossy();
-            let parts: Vec<&str> = path_str.split('/').collect();
-            root.insert(&parts);
-        }
-
-        root.format(2)
+        result
     }
 }
 
@@ -211,96 +164,5 @@ pub fn create_context_info(message_context: &MessageContext) -> ContextInfo {
     ContextInfo {
         directory_list_bytes: dir_list_size,
         files,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_file_tree_compaction() {
-        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
-
-        context.relevant_files = vec![
-            PathBuf::from("Cargo.toml"),
-            PathBuf::from("src/main.rs"),
-            PathBuf::from("src/lib.rs"),
-            PathBuf::from("src/module/file1.rs"),
-            PathBuf::from("src/module/file2.rs"),
-            PathBuf::from("src/module/submodule/file1.rs"),
-            PathBuf::from("src/module/submodule/file2.rs"),
-            PathBuf::from("src/module/submodule/file3.rs"),
-            PathBuf::from("tests/test1.rs"),
-            PathBuf::from("tests/test2.rs"),
-        ];
-
-        let formatted = context.to_formatted_string();
-
-        assert!(formatted.contains("Project Files:"));
-        assert!(formatted.contains("  Cargo.toml"));
-        assert!(formatted.contains("  src/"));
-        assert!(formatted.contains("    main.rs"));
-        assert!(formatted.contains("    lib.rs"));
-        assert!(formatted.contains("    module/"));
-        assert!(formatted.contains("      file1.rs"));
-        assert!(formatted.contains("      file2.rs"));
-        assert!(formatted.contains("      submodule/"));
-        assert!(formatted.contains("        file1.rs"));
-        assert!(formatted.contains("        file2.rs"));
-        assert!(formatted.contains("        file3.rs"));
-        assert!(formatted.contains("  tests/"));
-        assert!(formatted.contains("    test1.rs"));
-        assert!(formatted.contains("    test2.rs"));
-
-        let tree_size = formatted.len();
-
-        let flat_format = format!(
-            "Working Directory: .\n\nProject Files:\n  - Cargo.toml\n  - src/main.rs\n  - src/lib.rs\n  - src/module/file1.rs\n  - src/module/file2.rs\n  - src/module/submodule/file1.rs\n  - src/module/submodule/file2.rs\n  - src/module/submodule/file3.rs\n  - tests/test1.rs\n  - tests/test2.rs\n\n"
-        );
-        let flat_size = flat_format.len();
-
-        assert!(
-            tree_size < flat_size,
-            "Tree format should be more compact than flat format"
-        );
-    }
-
-    #[test]
-    fn test_file_tree_single_files() {
-        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
-
-        context.relevant_files = vec![
-            PathBuf::from("README.md"),
-            PathBuf::from("Cargo.toml"),
-            PathBuf::from(".gitignore"),
-        ];
-
-        let formatted = context.to_formatted_string();
-
-        assert!(formatted.contains("  README.md"));
-        assert!(formatted.contains("  Cargo.toml"));
-        assert!(formatted.contains("  .gitignore"));
-        assert!(!formatted.contains("/\n"));
-    }
-
-    #[test]
-    fn test_file_tree_deep_nesting() {
-        let mut context = MessageContext::new(vec![PathBuf::from(".")]);
-
-        context.relevant_files = vec![
-            PathBuf::from("a/b/c/d/e/file.rs"),
-            PathBuf::from("a/b/c/d/e/file2.rs"),
-        ];
-
-        let formatted = context.to_formatted_string();
-
-        assert!(formatted.contains("  a/"));
-        assert!(formatted.contains("    b/"));
-        assert!(formatted.contains("      c/"));
-        assert!(formatted.contains("        d/"));
-        assert!(formatted.contains("          e/"));
-        assert!(formatted.contains("            file.rs"));
-        assert!(formatted.contains("            file2.rs"));
     }
 }

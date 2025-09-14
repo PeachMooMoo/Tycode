@@ -30,13 +30,21 @@ impl Ignored {
         Ok(Self { patterns })
     }
 
-    pub fn is_ignored(&self, path: &str) -> bool {
-        // all '.' directories are always ignored - this is critical to avoid
-        // the AI modifying .git directories so we hard code it to reduce the
-        // chance of bugs!
+    pub fn is_ignored(&self, path: &str, is_dir: bool) -> bool {
+        // Hard-code ignoring dot directories to prevent accidental modification,
+        // but allow dot files like .gitignore - balances safety with utility.
         let components: Vec<&str> = path.split('/').collect();
-        if components.iter().any(|c| c.starts_with('.')) {
-            return true;
+        for (i, c) in components.iter().enumerate() {
+            if c.starts_with('.') {
+                if i < components.len() - 1 {
+                    return true; // intermediate dot component, like .git in path
+                } else {
+                    // last component starts with '.', only ignore if directory
+                    if is_dir {
+                        return true;
+                    }
+                }
+            }
         }
 
         for pattern in &self.patterns {

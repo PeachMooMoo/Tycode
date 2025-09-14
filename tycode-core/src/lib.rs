@@ -5,3 +5,4 @@ pub mod file;
 pub mod security;
 pub mod settings;
 pub mod tools;
+pub mod formatter;
