@@ -6,8 +6,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
-mod event_handler;
+mod commands;
 mod interactive_app;
+mod state;
 
 use crate::interactive_app::InteractiveApp;
 

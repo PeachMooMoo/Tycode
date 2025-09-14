@@ -1,5 +1,3 @@
-use crate::event_handler::EventFormatter;
-use tycode_core::formatter::Formatter;
 use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -7,12 +5,17 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::formatter::Formatter;
 use tycode_core::settings::manager::SettingsManager;
+
+use crate::commands::{handle_local_command, LocalCommandResult};
+use crate::state::State;
 
 pub struct InteractiveApp {
     chat_actor: ChatActor,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     formatter: Formatter,
+    state: State,
 }
 
 impl InteractiveApp {
@@ -38,6 +41,7 @@ impl InteractiveApp {
             chat_actor,
             event_rx,
             formatter,
+            state: State::default(),
         })
     }
 
@@ -61,8 +65,13 @@ impl InteractiveApp {
                 continue;
             }
 
-            if input == "/quit" || input == "/exit" {
-                break;
+            match handle_local_command(&mut self.state, input) {
+                LocalCommandResult::Handled { msg } => {
+                    self.formatter.print_system(&msg);
+                    continue;
+                }
+                LocalCommandResult::Exit => break,
+                LocalCommandResult::Unhandled => (),
             }
 
             rl.add_history_entry(&line)?;
@@ -104,16 +113,16 @@ impl InteractiveApp {
 
         Ok(())
     }
-}
 
-impl EventFormatter for InteractiveApp {
     fn format_event(&mut self, event: ChatEvent) -> Result<()> {
         match event {
             ChatEvent::MessageAdded(message) => match message.sender {
                 MessageSender::Assistant { agent } => {
-                    if let Some(ref reasoning) = message.reasoning {
-                        self.formatter
-                            .print_system(&format!("💭 Reasoning: {}", reasoning.text));
+                    if self.state.show_reasoning {
+                        if let Some(ref reasoning) = message.reasoning {
+                            self.formatter
+                                .print_system(&format!("💭 Reasoning: {}", reasoning.text));
+                        }
                     }
 
                     self.formatter.print_ai(
@@ -126,8 +135,14 @@ impl EventFormatter for InteractiveApp {
                     if !message.tool_calls.is_empty() {
                         let count = message.tool_calls.len();
                         let call_text = if count == 1 { "call" } else { "calls" };
-                        let names = message.tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<&str>>().join(", ");
-                        self.formatter.print_system(&format!("🔧 {} tool {}: {}", count, call_text, names));
+                        let names = message
+                            .tool_calls
+                            .iter()
+                            .map(|tc| tc.name.as_str())
+                            .collect::<Vec<&str>>()
+                            .join(", ");
+                        self.formatter
+                            .print_system(&format!("🔧 {} tool {}: {}", count, call_text, names));
                     }
                 }
                 MessageSender::System => {
