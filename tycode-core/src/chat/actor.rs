@@ -1,6 +1,6 @@
 use crate::agents::one_shot::OneShotAgent;
 use crate::chat::{
-    ai,
+    ai, tools,
     events::{ChatEvent, ChatMessage, EventSender},
     state::ChatConfig,
 };
@@ -234,7 +234,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
     state
         .event_sender
         .add_message(ChatMessage::user(input.clone()));
-    ai::current_agent_mut(state).conversation.push(Message {
+    tools::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
         content: Content::text_only(input),
     });

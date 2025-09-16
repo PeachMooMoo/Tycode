@@ -3,6 +3,7 @@ pub mod ai;
 pub mod commands;
 pub mod events;
 pub mod state;
+pub mod tools;
 
 pub use actor::{ChatActor, ChatActorMessage};
 pub use commands::CommandInfo;

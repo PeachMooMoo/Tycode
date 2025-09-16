@@ -3,9 +3,9 @@ use crate::ai::model::Model;
 use crate::ai::{ModelSettings, ReasoningBudget};
 use crate::chat::actor::create_provider;
 use crate::chat::events::EventSender;
+use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
-    ai::{self, current_agent},
     events::{ChatMessage, MessageSender},
     state::FileModificationApi,
 };
@@ -132,7 +132,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
     state.event_sender.clear_conversation();
-    ai::current_agent_mut(state).conversation.clear();
+    current_agent_mut(state).conversation.clear();
     vec![create_message(
         "Conversation cleared.".to_string(),
         MessageSender::System,
@@ -532,7 +532,7 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     }
 
     // Check if already on the agent to avoid unnecessary switching
-    if ai::current_agent(state).agent.name() == agent_name {
+    if current_agent(state).agent.name() == agent_name {
         return vec![create_message(
             format!("Already switched to agent: {}", agent_name),
             MessageSender::System,
@@ -540,7 +540,7 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     }
 
     // Preserve conversation from current agent before switching
-    let old_conversation = ai::current_agent(state).conversation.clone();
+    let old_conversation = current_agent(state).conversation.clone();
 
     // Create new root agent and replace the current one
     let new_agent_dyn = AgentCatalog::create_agent(agent_name).unwrap();

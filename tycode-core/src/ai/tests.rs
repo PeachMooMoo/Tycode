@@ -580,22 +580,155 @@ pub async fn test_reasoning_with_tools<P: AiProvider>(provider: P) -> Result<()>
     Ok(())
 }
 
-#[macro_export]
-macro_rules! run_provider_tests {
-    ($provider:expr, $provider_name:expr) => {
-        mod provider_tests {
-            use super::*;
-            use $crate::ai::tests::*;
+pub async fn test_multiple_tool_calls<P: AiProvider>(provider: P) -> Result<()> {
+    use std::collections::HashSet;
 
-            #[tokio::test]
-            async fn test_hello_world() {
-                if let Err(e) = test_hello_world($provider).await {
-                    tracing::error!(?e, "{} hello world test failed", $provider_name);
-                    panic!("{} hello world test failed: {:?}", $provider_name, e);
-                }
-            }
+    let supported_models = provider.supported_models();
+
+    for model in supported_models {
+        println!("Testing multiple tool calls with model: {}", model.name());
+
+        let calculator_tool = ToolDefinition {
+            name: "calculator".to_string(),
+            description: "Perform basic arithmetic calculations".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The mathematical expression to evaluate (e.g., '2+2', '10*5')"
+                    }
+                },
+                "required": ["expression"]
+            }),
+        };
+
+        let request = ConversationRequest {
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: Content::text_only("Calculate 2+3 using the calculator tool, and also calculate 5*7 using the calculator tool.".to_string()),
+            }],
+            model: ModelSettings {
+                model,
+                max_tokens: Some(1000),
+                temperature: Some(0.1),
+                top_p: None,
+                reasoning_budget: ReasoningBudget::Off,
+            },
+            system_prompt: "You are a helpful AI assistant. When asked to perform calculations, use the calculator tool provided.".to_string(),
+            stop_sequences: Vec::new(),
+            tools: vec![calculator_tool.clone()],
+        };
+
+        let response = provider.converse(request).await.map_err(|e| {
+            tracing::error!(
+                ?e,
+                "Multiple tool calls test failed for model {}",
+                model.name()
+            );
+            anyhow::anyhow!(
+                "Multiple tool calls test failed for model {}: {:?}",
+                model.name(),
+                e
+            )
+        })?;
+
+        assert!(
+            !response.content.is_empty(),
+            "Response should not be empty for model {}",
+            model.name()
+        );
+
+        let tool_uses = response.content.tool_uses();
+        println!(
+            "Model {} - Found {} tool use(s)",
+            model.name(),
+            tool_uses.len()
+        );
+
+        assert!(
+            tool_uses.len() >= 2,
+            "Response should contain at least two tool uses for model {}: {response:?}",
+            model.name()
+        );
+
+        let mut ids = HashSet::new();
+        let mut responses = vec![];
+        for tool_use in &tool_uses {
+            assert!(
+                tool_use.name == "calculator",
+                "Each tool use should be calculator for model {}",
+                model.name()
+            );
+            assert!(
+                !tool_use.id.is_empty(),
+                "Tool use should have an ID for model {}",
+                model.name()
+            );
+            assert!(
+                ids.insert(tool_use.id.clone()),
+                "Tool use IDs should be unique for model {}",
+                model.name()
+            );
+            assert!(
+                tool_use.arguments.is_object(),
+                "Tool use arguments should be an object for model {}",
+                model.name()
+            );
+            println!(
+                "Model {} - Tool use ID: {}, expression: {:?}",
+                model.name(),
+                tool_use.id,
+                tool_use.arguments.get("expression")
+            );
+
+            responses.push(ContentBlock::ToolResult(ToolResultData {
+                tool_use_id: tool_use.id.clone(),
+                content: "35".to_string(),
+                is_error: false,
+            }));
         }
-    };
-}
 
-pub use run_provider_tests;
+        responses.reverse();
+        responses.push(ContentBlock::Text("These are the tool results".to_string()));
+        let responses = Content::new(responses);
+        let request = ConversationRequest {
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: Content::text_only("Calculate 2+3 using the calculator tool, and also calculate 5*7 using the calculator tool.".to_string()),
+            }, Message { role: MessageRole::Assistant, content: response.content }, Message { role: MessageRole::User, content: responses } ],
+            model: ModelSettings {
+                model,
+                max_tokens: Some(1000),
+                temperature: Some(0.1),
+                top_p: None,
+                reasoning_budget: ReasoningBudget::Off,
+            },
+            system_prompt: "You are a helpful AI assistant. When asked to perform calculations, use the calculator tool provided.".to_string(),
+            stop_sequences: Vec::new(),
+            tools: vec![calculator_tool],
+        };
+
+        println!("Sending follow up request: {:?}", request);
+        let response = provider.converse(request).await.map_err(|e| {
+            tracing::error!(
+                ?e,
+                "Multiple tool calls test failed for model {}",
+                model.name()
+            );
+            anyhow::anyhow!(
+                "Multiple tool calls test failed for model {}: {:?}",
+                model.name(),
+                e
+            )
+        })?;
+
+        println!(
+            "Model {} - Multiple tool calls test completed successfully: {:?}",
+            model.name(),
+            response
+        );
+    }
+
+    Ok(())
+}

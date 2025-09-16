@@ -290,6 +290,7 @@ impl AiProvider for BedrockProvider {
             converse_request = converse_request.tool_config(tool_config);
         }
 
+        println!("about to send converse request: {converse_request:?}");
         let response = converse_request.send().await.map_err(|e| {
             tracing::warn!(?e, "Bedrock converse failed");
 
@@ -365,12 +366,12 @@ impl AiProvider for BedrockProvider {
 mod tests {
     use super::*;
     use crate::ai::tests::{
-        test_hello_world, test_reasoning_conversation, test_reasoning_with_tools, test_tool_usage,
+        test_hello_world, test_multiple_tool_calls, test_reasoning_conversation,
+        test_reasoning_with_tools, test_tool_usage,
     };
 
     async fn create_bedrock_provider() -> anyhow::Result<BedrockProvider> {
         let bedrock_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .profile_name("cline")
             .region(aws_config::Region::new("us-west-2"))
             .load()
             .await;
@@ -441,6 +442,23 @@ mod tests {
         };
 
         if let Err(e) = test_reasoning_with_tools(provider).await {
+            tracing::error!(?e, "Bedrock reasoning with tools test failed");
+            panic!("Bedrock reasoning with tools test failed: {:?}", e);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires AWS credentials"]
+    async fn test_bedrock_multiple_tool_calls() {
+        let provider = match create_bedrock_provider().await {
+            Ok(provider) => provider,
+            Err(e) => {
+                tracing::error!(?e, "Failed to create Bedrock provider");
+                panic!("Failed to create Bedrock provider: {:?}", e);
+            }
+        };
+
+        if let Err(e) = test_multiple_tool_calls(provider).await {
             tracing::error!(?e, "Bedrock reasoning with tools test failed");
             panic!("Bedrock reasoning with tools test failed: {:?}", e);
         }
